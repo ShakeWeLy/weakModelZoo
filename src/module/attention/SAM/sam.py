@@ -22,6 +22,7 @@ class SAM(nn.Module):
         )
         self.sigmoid = nn.Sigmoid()
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_avg = torch.mean(x, dim=1, keepdim=True)  # using mean instead of nn.AdaptiveAvgPool2d(1)
         x_max = torch.max(x, dim=1, keepdim=True).values  # return (values, indices), so we need to get the values
 
