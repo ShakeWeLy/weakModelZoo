@@ -1,0 +1,15 @@
+# IDE and test cache
+.cursor/*
+.vscode/*
+.pytest_cache/*
+.ruff_cache/*
+.mypy_cache/*
+.pytest_cache/*
+.ruff_cache/*
+.mypy_cache/*
+.pytest_cache/*
+.ruff_cache/*
+.mypy_cache/*
+
+# Data
+data/*
