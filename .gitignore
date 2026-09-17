@@ -16,5 +16,4 @@ __pycache__/
 data/*
 
 # experiments
-experiments/
 experiments/*/*/*/outputs/
