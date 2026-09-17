@@ -14,3 +14,7 @@
 __pycache__/
 # Data
 data/*
+
+# experiments
+experiments/
+experiments/*/*/*/outputs/
