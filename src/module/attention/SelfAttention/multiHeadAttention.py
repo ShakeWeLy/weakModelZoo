@@ -20,7 +20,11 @@ class MultiHeadAttention(nn.Module):
         self.qkv = nn.Linear(embed_dim, embed_dim * 3)
         self.out = nn.Linear(embed_dim, embed_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         if x.ndim != 3:
             raise ValueError(f"Input must be a 3D tensor, but got {x.ndim}D tensor")
         batch_size, seq_len, channels = x.shape
@@ -34,6 +38,8 @@ class MultiHeadAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         attention = torch.matmul(q, k.transpose(-2, -1)) / (self.head_embed_dim ** 0.5)
+        if attn_mask is not None:
+            attention = attention + attn_mask.unsqueeze(1)
         attention = torch.softmax(attention, dim=-1)
         out = torch.matmul(attention, v)
         out = out.transpose(1, 2).reshape(batch_size, seq_len, self.embed_dim)
