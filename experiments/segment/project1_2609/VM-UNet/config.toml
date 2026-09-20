@@ -1,0 +1,36 @@
+[dataset]
+image_size = 224
+batch_size = 2
+num_workers = 1
+
+[hyperparameters]
+learning_rate = 0.0001
+weight_decay = 0.0001
+num_epochs = 300
+momentum = 0.9
+optimizer = "adam"
+
+[model]
+hidden_channels = 32
+class_nums = 14
+depths = [1, 1, 1, 1]
+depths_decoder = [1, 1, 1, 1]
+d_state = 16
+drop_path_rate = 0.1
+use_checkpoint = true
+
+[train]
+data_dir = "data/synapse_processed"
+output_dir = "experiments/segment/project1_2609/VM-UNet/outputs"
+device = "cuda"
+save_every = 50
+
+[test]
+data_dir = "data/synapse_processed"
+checkpoint = "experiments/segment/project1_2609/VM-UNet/outputs/best_vm_unet.pth"
+output_dir = "experiments/segment/project1_2609/VM-UNet/outputs/analysis"
+device = "cuda"
+splits = ["val", "test"]
+save_predictions = true
+save_visualizations = true
+visualize_num = 5
