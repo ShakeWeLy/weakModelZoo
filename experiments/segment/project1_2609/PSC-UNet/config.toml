@@ -1,0 +1,34 @@
+[dataset]
+image_size = 224
+batch_size = 1
+num_workers = 1
+
+[hyperparameters]
+learning_rate = 0.0001
+weight_decay = 0.0001
+num_epochs = 300
+momentum = 0.9
+optimizer = "adam"
+
+[model]
+base_dim = 32
+class_nums = 14
+in_channels = 1
+swin_depths = [1, 1, 1, 1]
+repeat_gray_to_rgb = false
+
+[train]
+data_dir = "data/synapse_processed"
+output_dir = "experiments/segment/project1_2609/PSC-UNet/outputs"
+device = "cuda"
+save_every = 50
+
+[test]
+data_dir = "data/synapse_processed"
+checkpoint = "experiments/segment/project1_2609/PSC-UNet/outputs/best_psc_unet.pth"
+output_dir = "experiments/segment/project1_2609/PSC-UNet/outputs/analysis"
+device = "cuda"
+splits = ["val", "test"]
+save_predictions = true
+save_visualizations = true
+visualize_num = 5
