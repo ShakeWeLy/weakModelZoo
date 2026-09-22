@@ -1,19 +1,21 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
 # IDE and test cache
 .cursor/*
 .vscode/*
-.pytest_cache/*
-.ruff_cache/*
-.mypy_cache/*
-.pytest_cache/*
-.ruff_cache/*
-.mypy_cache/*
-.pytest_cache/*
-.ruff_cache/*
-.mypy_cache/*
-*.pyc
-__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
 # Data
 data/*
 
 # experiments
 experiments/*/*/*/outputs/
+
+# github source
+*-main/

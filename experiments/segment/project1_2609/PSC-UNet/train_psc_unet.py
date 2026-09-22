@@ -7,9 +7,8 @@
 """
 
 from __future__ import annotations
-
+ 
 import argparse
-import csv
 import importlib.util
 import sys
 import time
@@ -23,6 +22,8 @@ from torch.utils.data import DataLoader, Dataset
 EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
+
+from src.utils.logger import CheckpointManager, CsvMetricsLogger, setup_file_logger
 
 try:
     import tomllib
@@ -310,63 +311,72 @@ def main():
     criterion = DiceLoss(num_classes=num_classes, ignore_background=True)
     optimizer = build_optimizer(hyper_cfg, model)
 
-    log_path = output_dir / "train_log.csv"
-    best_dice = -1.0
-    best_ckpt = output_dir / "best_psc_unet.pth"
-    with log_path.open("w", newline="", encoding="utf-8") as log_file:
-        writer = csv.writer(log_file)
-        writer.writerow(["epoch", "train_loss", "train_dice", "val_loss", "val_dice", "seconds"])
+    logger = setup_file_logger(output_dir)
+    ckpt_mgr = CheckpointManager(
+        output_dir,
+        best_name="best_psc_unet.pth",
+        periodic_prefix="psc_unet",
+        save_every=int(train_cfg.get("save_every", 50)),
+    )
 
-        print(f"Device: {device}", flush=True)
-        print(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}", flush=True)
-        print(f"Output dir: {output_dir}", flush=True)
-        print(
+    with CsvMetricsLogger(output_dir / "train_log.csv") as metrics_logger:
+        last_epoch = metrics_logger.last_epoch()
+        if last_epoch is not None:
+            logger.info(f"检测到已有训练记录，上次 epoch={last_epoch}，将继续追加写入")
+
+        logger.info(f"Device: {device}")
+        logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
+        logger.info(f"Output dir: {output_dir}")
+        logger.info(
             f"Model: image_size={image_size}, in_channels={in_channels}, base_dim={base_dim}, "
-            f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}",
-            flush=True,
+            f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}"
         )
+        if ckpt_mgr.best_metric > 0:
+            logger.info(f"已加载历史 best val dice: {ckpt_mgr.best_metric:.4f}")
 
         for epoch in range(1, num_epochs + 1):
             start = time.time()
             train_loss, train_dice = train_one_epoch(model, train_loader, criterion, optimizer, device)
             val_loss, val_dice = validate(model, val_loader, criterion, device)
             elapsed = time.time() - start
-            writer.writerow([epoch, train_loss, train_dice, val_loss, val_dice, round(elapsed, 2)])
-            print(
+            metrics_logger.log(
+                {
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "train_dice": train_dice,
+                    "val_loss": val_loss,
+                    "val_dice": val_dice,
+                    "seconds": round(elapsed, 2),
+                }
+            )
+            logger.info(
                 f"Epoch [{epoch:03d}/{num_epochs}] "
                 f"train_loss={train_loss:.4f} train_dice={train_dice:.4f} "
                 f"val_loss={val_loss:.4f} val_dice={val_dice:.4f} "
-                f"time={elapsed:.1f}s",
-                flush=True,
+                f"time={elapsed:.1f}s"
             )
 
-            if val_dice > best_dice:
-                best_dice = val_dice
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "best_val_dice": best_dice,
-                        "config": cfg,
-                    },
-                    best_ckpt,
-                )
+            ckpt_mgr.maybe_save_best(
+                val_dice,
+                epoch,
+                {
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "config": cfg,
+                },
+            )
+            ckpt_mgr.maybe_save_periodic(
+                epoch,
+                {
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "val_dice": val_dice,
+                    "config": cfg,
+                },
+            )
 
-            if epoch % int(train_cfg.get("save_every", 50)) == 0:
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "val_dice": val_dice,
-                        "config": cfg,
-                    },
-                    output_dir / f"psc_unet_epoch_{epoch:03d}.pth",
-                )
-
-    print(f"Best val dice: {best_dice:.4f}")
-    print(f"Best checkpoint: {best_ckpt}")
+    logger.info(f"Best val dice: {ckpt_mgr.best_metric:.4f}")
+    logger.info(f"Best checkpoint: {ckpt_mgr.best_path}")
 
 
 if __name__ == "__main__":

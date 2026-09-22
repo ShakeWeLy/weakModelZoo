@@ -1,6 +1,6 @@
 [dataset]
 image_size = 224
-batch_size = 1
+batch_size = 8
 num_workers = 1
 
 [hyperparameters]
