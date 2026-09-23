@@ -312,12 +312,7 @@ def main():
     optimizer = build_optimizer(hyper_cfg, model)
 
     logger = setup_file_logger(output_dir)
-    ckpt_mgr = CheckpointManager(
-        output_dir,
-        best_name="best_psc_unet.pth",
-        periodic_prefix="psc_unet",
-        save_every=int(train_cfg.get("save_every", 50)),
-    )
+    ckpt_mgr = CheckpointManager(output_dir / "checkpoints")
 
     with CsvMetricsLogger(output_dir / "train_log.csv") as metrics_logger:
         last_epoch = metrics_logger.last_epoch()
@@ -356,24 +351,14 @@ def main():
                 f"time={elapsed:.1f}s"
             )
 
-            ckpt_mgr.maybe_save_best(
-                val_dice,
-                epoch,
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "config": cfg,
-                },
-            )
-            ckpt_mgr.maybe_save_periodic(
-                epoch,
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "val_dice": val_dice,
-                    "config": cfg,
-                },
-            )
+            state = {
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_dice": val_dice,
+                "config": cfg,
+            }
+            ckpt_mgr.save_last(epoch, state)
+            ckpt_mgr.maybe_save_best(val_dice, epoch, state)
 
     logger.info(f"Best val dice: {ckpt_mgr.best_metric:.4f}")
     logger.info(f"Best checkpoint: {ckpt_mgr.best_path}")

@@ -1,3 +1,9 @@
+[experiments]
+name = "2026-09-23_001_AttnUNet"
+date = "2026-09-23"
+description = "first attnunet experiment"
+runs_dir = "runs"
+
 [dataset]
 image_size = 224
 batch_size = 8
@@ -16,14 +22,10 @@ class_nums = 14
 
 [train]
 data_dir = "data/synapse_processed"
-output_dir = "experiments/segment/project1_2609/AttnUNet/outputs"
 device = "cuda"
-save_every = 50
 
 [test]
 data_dir = "data/synapse_processed"
-checkpoint = "experiments/segment/project1_2609/AttnUNet/outputs/best_attn_unet.pth"
-output_dir = "experiments/segment/project1_2609/AttnUNet/outputs/analysis"
 device = "cuda"
 splits = ["val", "test"]
 save_predictions = true

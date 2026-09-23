@@ -22,7 +22,14 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.models.segment.AttentionGateUnet.AttentionGateUnet import AttentionGateUnet
-from src.utils.logger import CheckpointManager, CsvMetricsLogger, setup_file_logger
+from src.utils.logger import (
+    CheckpointManager,
+    CsvMetricsLogger,
+    create_experiment_run,
+    resolve_runs_root,
+    setup_file_logger,
+    update_training_summary,
+)
 
 try:
     import tomllib
@@ -197,9 +204,18 @@ def main():
     model_cfg = cfg["model"]
     train_cfg = cfg.get("train", {})
 
+    exp_cfg = cfg.get("experiments", {})
+    experiment_name = exp_cfg.get("name")
+    if not experiment_name:
+        raise ValueError("config 缺少 [experiments].name，每次训练请指定唯一名称")
+
     data_dir = ROOT / train_cfg.get("data_dir", "data/synapse_processed")
-    output_dir = ROOT / train_cfg.get("output_dir", str(EXP_DIR.relative_to(ROOT) / "outputs"))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    run = create_experiment_run(
+        resolve_runs_root(EXP_DIR, cfg),
+        experiment_name,
+        cfg,
+        args.config,
+    )
 
     device = torch.device(args.device or train_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
     image_size = int(dataset_cfg["image_size"])
@@ -247,25 +263,16 @@ def main():
             weight_decay=float(hyper_cfg["weight_decay"]),
         )
 
-    logger = setup_file_logger(output_dir)
-    ckpt_mgr = CheckpointManager(
-        output_dir,
-        best_name="best_attn_unet.pth",
-        periodic_prefix="attn_unet",
-        save_every=int(train_cfg.get("save_every", 50)),
-    )
+    logger = setup_file_logger(run.run_dir)
+    ckpt_mgr = CheckpointManager(run.checkpoints_dir)
 
-    with CsvMetricsLogger(output_dir / "train_log.csv") as metrics_logger:
-        last_epoch = metrics_logger.last_epoch()
-        if last_epoch is not None:
-            logger.info(f"检测到已有训练记录，上次 epoch={last_epoch}，将继续追加写入")
+    logger.info(f"Experiment: {run.name}")
+    logger.info(f"Run dir: {run.run_dir}")
 
+    with CsvMetricsLogger(run.history_path) as metrics_logger:
         logger.info(f"Device: {device}")
         logger.info("Model: AttentionGateUnet")
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
-        logger.info(f"Output dir: {output_dir}")
-        if ckpt_mgr.best_metric > 0:
-            logger.info(f"已加载历史 best val dice: {ckpt_mgr.best_metric:.4f}")
 
         for epoch in range(1, num_epochs + 1):
             start = time.time()
@@ -289,27 +296,25 @@ def main():
                 f"time={elapsed:.1f}s"
             )
 
-            ckpt_mgr.maybe_save_best(
-                val_dice,
-                epoch,
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "config": cfg,
-                },
-            )
-            ckpt_mgr.maybe_save_periodic(
-                epoch,
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "val_dice": val_dice,
-                    "config": cfg,
-                },
-            )
+            state = {
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_dice": val_dice,
+                "config": cfg,
+            }
+            ckpt_mgr.save_last(epoch, state)
+            ckpt_mgr.maybe_save_best(val_dice, epoch, state)
 
+    update_training_summary(
+        run.summary_path,
+        status="completed",
+        best_val_dice=ckpt_mgr.best_metric,
+        best_epoch=ckpt_mgr.best_epoch,
+        completed_epochs=num_epochs,
+    )
     logger.info(f"Best val dice: {ckpt_mgr.best_metric:.4f}")
     logger.info(f"Best checkpoint: {ckpt_mgr.best_path}")
+    logger.info(f"Last checkpoint: {ckpt_mgr.last_path}")
 
 
 if __name__ == "__main__":

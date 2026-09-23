@@ -24,6 +24,7 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.models.segment.AttentionGateUnet.AttentionGateUnet import AttentionGateUnet
+from src.utils.logger import resolve_experiment_run, update_evaluation_summary
 
 try:
     import tomllib
@@ -207,8 +208,9 @@ def run_split(
     save_visualizations: bool,
     visualize_num: int,
 ) -> dict:
-    pred_dir = output_dir / split / "predictions"
-    vis_dir = output_dir / split / "visualizations"
+    split_dir = output_dir / split
+    pred_dir = split_dir / "predictions"
+    vis_dir = split_dir / "visualizations"
     slice_rows = []
     class_metrics: dict[int, dict[str, list[float]]] = {}
     visualized = 0
@@ -261,14 +263,17 @@ def run_split(
     summary["num_slices"] = len(slice_rows)
     summary["num_labeled_slices"] = sum(1 for row in slice_rows if row["has_label"])
 
-    with (output_dir / f"{split}_slice_metrics.csv").open("w", newline="", encoding="utf-8") as f:
+    split_dir = output_dir / split
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    with (split_dir / "slice_metrics.csv").open("w", newline="", encoding="utf-8") as f:
         if slice_rows:
             fieldnames = sorted({key for row in slice_rows for key in row})
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(slice_rows)
 
-    with (output_dir / f"{split}_summary.json").open("w", encoding="utf-8") as f:
+    with (split_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     return summary
@@ -329,12 +334,10 @@ def main():
     train_cfg = cfg.get("train", {})
     test_cfg = cfg.get("test", {})
 
+    run = resolve_experiment_run(EXP_DIR, cfg)
     data_dir = ROOT / test_cfg.get("data_dir", train_cfg.get("data_dir", "data/synapse_processed"))
-    output_dir = ROOT / test_cfg.get("output_dir", str(EXP_DIR.relative_to(ROOT) / "outputs" / "analysis"))
-    checkpoint_path = ROOT / test_cfg.get(
-        "checkpoint",
-        str(EXP_DIR.relative_to(ROOT) / "outputs" / "best_attn_unet.pth"),
-    )
+    output_dir = run.predictions_dir
+    checkpoint_path = run.best_checkpoint
     output_dir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device(args.device or test_cfg.get("device", train_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")))
@@ -352,10 +355,11 @@ def main():
     model = load_model(checkpoint_path, model_cfg, device)
     all_summaries = []
 
+    print(f"Experiment: {run.name}")
     print(f"Device: {device}")
     print(f"Model: AttentionGateUnet")
     print(f"Checkpoint: {checkpoint_path}")
-    print(f"Output dir: {output_dir}")
+    print(f"Predictions dir: {output_dir}")
 
     for split in splits:
         dataset = InferenceDataset(data_dir, split, image_size)
@@ -380,8 +384,11 @@ def main():
         all_summaries.append(summary)
         print_summary(summary)
 
-    with (output_dir / "analysis_summary.json").open("w", encoding="utf-8") as f:
-        json.dump(all_summaries, f, ensure_ascii=False, indent=2)
+    evaluation = {
+        "checkpoint": str(checkpoint_path),
+        "splits": all_summaries,
+    }
+    update_evaluation_summary(run.summary_path, evaluation)
 
     readme_rows = []
     for summary in all_summaries:
@@ -399,12 +406,14 @@ def main():
         readme_rows.append(row)
 
     if readme_rows:
-        with (output_dir / "paper_metrics.csv").open("w", newline="", encoding="utf-8-sig") as f:
+        paper_metrics_path = run.run_dir / "paper_metrics.csv"
+        with paper_metrics_path.open("w", newline="", encoding="utf-8-sig") as f:
             fieldnames = list(readme_rows[0].keys())
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(readme_rows)
-        print(f"\n论文指标表已保存: {output_dir / 'paper_metrics.csv'}")
+        print(f"\n论文指标表已保存: {paper_metrics_path}")
+        print(f"实验摘要已更新: {run.summary_path}")
 
 
 if __name__ == "__main__":
