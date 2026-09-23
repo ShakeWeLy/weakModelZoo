@@ -23,7 +23,16 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.logger import CheckpointManager, CsvMetricsLogger, setup_file_logger
+from src.utils.data.synapse.labels import EVAL_CLASS_IDS, LABEL_NAMES
+from src.utils.logger import (
+    CheckpointManager,
+    ClassMetricsLogger,
+    CsvMetricsLogger,
+    create_experiment_run,
+    resolve_runs_root,
+    setup_file_logger,
+    update_training_summary,
+)
 
 try:
     import tomllib
@@ -248,6 +257,68 @@ def validate(
     return total_loss / count, total_dice / count
 
 
+@torch.no_grad()
+def compute_per_class_dice(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    class_ids: tuple[int, ...] | list[int],
+    eps: float = 1e-6,
+) -> dict[int, float | None]:
+    model.eval()
+    intersection = {class_id: 0.0 for class_id in class_ids}
+    union = {class_id: 0.0 for class_id in class_ids}
+    for images, labels in loader:
+        images = images.to(device)
+        labels = labels.to(device)
+        preds = torch.argmax(model(images), dim=1)
+        for class_id in class_ids:
+            pred_mask = preds == class_id
+            target_mask = labels == class_id
+            intersection[class_id] += (pred_mask & target_mask).sum().item()
+            union[class_id] += pred_mask.sum().item() + target_mask.sum().item()
+    results: dict[int, float | None] = {}
+    for class_id in class_ids:
+        if union[class_id] == 0:
+            results[class_id] = None
+        else:
+            results[class_id] = float((2.0 * intersection[class_id] + eps) / (union[class_id] + eps))
+    return results
+
+
+def should_log_class_metrics(epoch: int, num_epochs: int, every: int) -> bool:
+    if every <= 0:
+        return False
+    return epoch == 1 or epoch == num_epochs or epoch % every == 0
+
+
+def log_class_metrics(
+    epoch: int,
+    split: str,
+    class_dice: dict[int, float | None],
+    class_metrics_logger: ClassMetricsLogger,
+    logger,
+) -> None:
+    rows = []
+    parts = []
+    for class_id in sorted(class_dice):
+        dice = class_dice[class_id]
+        class_name = LABEL_NAMES.get(class_id, f"class_{class_id}")
+        rows.append(
+            {
+                "epoch": epoch,
+                "split": split,
+                "class_id": class_id,
+                "class_name": class_name,
+                "dice": round(dice, 4) if dice is not None else "",
+            }
+        )
+        dice_text = f"{dice:.4f}" if dice is not None else "N/A"
+        parts.append(f"{class_name}={dice_text}")
+    class_metrics_logger.log_rows(rows)
+    logger.info(f"Epoch [{epoch:03d}] class dice [{split}]: " + ", ".join(parts))
+
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
@@ -256,9 +327,25 @@ def main():
     model_cfg = cfg["model"]
     train_cfg = cfg.get("train", {})
 
+    exp_cfg = cfg.get("experiments", {})
+    experiment_name = exp_cfg.get("name")
+    if not experiment_name:
+        raise ValueError("config 缺少 [experiments].name，每次训练请指定唯一名称")
+
+    num_epochs = int(args.epochs or hyper_cfg["num_epochs"])
+    hyper_cfg["num_epochs"] = num_epochs
+    if args.quick:
+        model_cfg["base_dim"] = 16
+        dataset_cfg["batch_size"] = 1
+        model_cfg["swin_depths"] = [1, 1, 1, 1]
+
     data_dir = ROOT / train_cfg.get("data_dir", "data/synapse_processed")
-    output_dir = ROOT / train_cfg.get("output_dir", str(EXP_DIR.relative_to(ROOT) / "outputs"))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    run = create_experiment_run(
+        resolve_runs_root(EXP_DIR, cfg),
+        experiment_name,
+        cfg,
+        args.config,
+    )
 
     device = torch.device(args.device or train_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
     image_size = int(dataset_cfg["image_size"])
@@ -269,12 +356,9 @@ def main():
     in_channels = int(model_cfg.get("in_channels", 1))
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
     swin_depths = tuple(int(v) for v in model_cfg.get("swin_depths", [2, 2, 2, 2]))
-    num_epochs = int(args.epochs or hyper_cfg["num_epochs"])
-
-    if args.quick:
-        base_dim = 16
-        batch_size = 1
-        swin_depths = (1, 1, 1, 1)
+    class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
+    class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
+    metric_class_ids = tuple(int(v) for v in train_cfg.get("metric_class_ids", EVAL_CLASS_IDS))
 
     if repeat_gray_to_rgb:
         in_channels = 3
@@ -311,23 +395,26 @@ def main():
     criterion = DiceLoss(num_classes=num_classes, ignore_background=True)
     optimizer = build_optimizer(hyper_cfg, model)
 
-    logger = setup_file_logger(output_dir)
-    ckpt_mgr = CheckpointManager(output_dir / "checkpoints")
+    logger = setup_file_logger(run.run_dir)
+    ckpt_mgr = CheckpointManager(run.checkpoints_dir)
+    split_loaders = {"train": train_loader, "val": val_loader}
 
-    with CsvMetricsLogger(output_dir / "train_log.csv") as metrics_logger:
-        last_epoch = metrics_logger.last_epoch()
-        if last_epoch is not None:
-            logger.info(f"检测到已有训练记录，上次 epoch={last_epoch}，将继续追加写入")
+    logger.info(f"Experiment: {run.name}")
+    logger.info(f"Run dir: {run.run_dir}")
 
+    with CsvMetricsLogger(run.history_path) as metrics_logger, ClassMetricsLogger(
+        run.run_dir / "class_metrics.csv"
+    ) as class_metrics_logger:
         logger.info(f"Device: {device}")
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
-        logger.info(f"Output dir: {output_dir}")
         logger.info(
             f"Model: image_size={image_size}, in_channels={in_channels}, base_dim={base_dim}, "
             f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}"
         )
-        if ckpt_mgr.best_metric > 0:
-            logger.info(f"已加载历史 best val dice: {ckpt_mgr.best_metric:.4f}")
+        if class_metrics_every > 0:
+            logger.info(
+                f"Class metrics every {class_metrics_every} epochs on splits: {class_metrics_splits}"
+            )
 
         for epoch in range(1, num_epochs + 1):
             start = time.time()
@@ -360,8 +447,28 @@ def main():
             ckpt_mgr.save_last(epoch, state)
             ckpt_mgr.maybe_save_best(val_dice, epoch, state)
 
+            if should_log_class_metrics(epoch, num_epochs, class_metrics_every):
+                for split in class_metrics_splits:
+                    loader = split_loaders.get(split)
+                    if loader is None:
+                        continue
+                    class_dice = compute_per_class_dice(
+                        model, loader, device, metric_class_ids
+                    )
+                    log_class_metrics(
+                        epoch, split, class_dice, class_metrics_logger, logger
+                    )
+
+    update_training_summary(
+        run.summary_path,
+        status="completed",
+        best_val_dice=ckpt_mgr.best_metric,
+        best_epoch=ckpt_mgr.best_epoch,
+        completed_epochs=num_epochs,
+    )
     logger.info(f"Best val dice: {ckpt_mgr.best_metric:.4f}")
     logger.info(f"Best checkpoint: {ckpt_mgr.best_path}")
+    logger.info(f"Last checkpoint: {ckpt_mgr.last_path}")
 
 
 if __name__ == "__main__":

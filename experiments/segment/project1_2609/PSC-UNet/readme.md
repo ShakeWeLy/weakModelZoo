@@ -4,8 +4,10 @@
 
 ## 运行
 
+每次训练前在 `config.toml` 中设置唯一的 `[experiments].name`：
+
 ```bash
-# 项目根目录
+# 训练
 python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py
 
 # 指定配置
@@ -13,6 +15,27 @@ python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py --config exp
 
 # 快速试跑 1 个 epoch
 python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py --epochs 1 --quick
+
+# 推理与评估
+python experiments/segment/project1_2609/PSC-UNet/analysis_psc_unet.py
+```
+
+## 输出
+
+```
+PSC-UNet/runs/2026-09-23_001_PSC-UNet/
+├── config.yaml
+├── history.csv
+├── class_metrics.csv
+├── summary.json
+├── train.log
+├── paper_metrics.csv
+├── checkpoints/
+│   ├── best.pth
+│   └── last.pth
+└── predictions/
+    ├── val/
+    └── test/
 ```
 
 ## 说明
@@ -21,4 +44,4 @@ python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py --epochs 1 -
 - 损失函数：多类 Dice Loss（忽略背景类）
 - `image_size` 需能被 **32** 整除，且 `image_size/4` 能被 **7**（Swin window_size）整除，默认 224
 - 灰度输入默认 `in_channels=1`；若设 `repeat_gray_to_rgb=true`，会自动 repeat 为 3 通道
-- 输出：`experiments/segment/project1_2609/PSC-UNet/outputs/`
+- 每 `class_metrics_every` 个 epoch 记录各器官 Dice 到 `class_metrics.csv`

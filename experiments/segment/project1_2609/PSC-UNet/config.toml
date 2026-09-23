@@ -1,3 +1,9 @@
+[experiments]
+name = "2026-09-23_001_PSC-UNet"
+date = "2026-09-23"
+description = "first psc-unet experiment"
+runs_dir = "runs"
+
 [dataset]
 image_size = 224
 batch_size = 8
@@ -19,16 +25,16 @@ repeat_gray_to_rgb = false
 
 [train]
 data_dir = "data/synapse_processed"
-output_dir = "experiments/segment/project1_2609/PSC-UNet/outputs"
 device = "cuda"
-save_every = 50
+class_metrics_every = 10
+class_metrics_splits = ["val", "train"]
 
 [test]
 data_dir = "data/synapse_processed"
-checkpoint = "experiments/segment/project1_2609/PSC-UNet/outputs/best_psc_unet.pth"
-output_dir = "experiments/segment/project1_2609/PSC-UNet/outputs/analysis"
 device = "cuda"
-splits = ["val", "test"]
+splits = ["train", "val", "test"]
 save_predictions = true
+save_predictions_splits = ["val"]
 save_visualizations = true
+save_visualizations_splits = ["val", "test"]
 visualize_num = 5
