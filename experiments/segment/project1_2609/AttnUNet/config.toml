@@ -23,6 +23,8 @@ class_nums = 14
 [train]
 data_dir = "data/synapse_processed"
 device = "cuda"
+class_metrics_every = 10
+class_metrics_splits = ["val", "train"]
 
 [test]
 data_dir = "data/synapse_processed"

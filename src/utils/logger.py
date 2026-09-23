@@ -302,6 +302,54 @@ class CsvMetricsLogger:
         self.close()
 
 
+DEFAULT_CLASS_METRIC_FIELDS = (
+    "epoch",
+    "split",
+    "class_id",
+    "class_name",
+    "dice",
+)
+
+
+class ClassMetricsLogger:
+    """追加写入逐类别指标 CSV。"""
+
+    def __init__(self, path: Path, fieldnames: Sequence[str] | None = None) -> None:
+        self.path = Path(path)
+        self.fieldnames = tuple(fieldnames or DEFAULT_CLASS_METRIC_FIELDS)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = None
+        self._writer: csv.DictWriter | None = None
+        self._open()
+
+    def _open(self) -> None:
+        write_header = not self.path.exists() or self.path.stat().st_size == 0
+        self._file = self.path.open("a", newline="", encoding="utf-8")
+        self._writer = csv.DictWriter(self._file, fieldnames=self.fieldnames, extrasaction="ignore")
+        if write_header:
+            self._writer.writeheader()
+            self._file.flush()
+
+    def log_rows(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        if self._writer is None or self._file is None:
+            raise RuntimeError("ClassMetricsLogger 已关闭")
+        for row in rows:
+            self._writer.writerow({field: row.get(field) for field in self.fieldnames})
+        self._file.flush()
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+            self._writer = None
+
+    def __enter__(self) -> ClassMetricsLogger:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+
 class CheckpointManager:
     """管理 checkpoints/best.pth 与 checkpoints/last.pth。"""
 

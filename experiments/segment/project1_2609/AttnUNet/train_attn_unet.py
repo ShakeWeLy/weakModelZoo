@@ -22,8 +22,10 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.models.segment.AttentionGateUnet.AttentionGateUnet import AttentionGateUnet
+from src.utils.data.synapse.labels import EVAL_CLASS_IDS, LABEL_NAMES
 from src.utils.logger import (
     CheckpointManager,
+    ClassMetricsLogger,
     CsvMetricsLogger,
     create_experiment_run,
     resolve_runs_root,
@@ -196,6 +198,68 @@ def validate(
     return total_loss / count, total_dice / count
 
 
+@torch.no_grad()
+def compute_per_class_dice(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    class_ids: tuple[int, ...] | list[int],
+    eps: float = 1e-6,
+) -> dict[int, float | None]:
+    model.eval()
+    intersection = {class_id: 0.0 for class_id in class_ids}
+    union = {class_id: 0.0 for class_id in class_ids}
+    for images, labels in loader:
+        images = images.to(device)
+        labels = labels.to(device)
+        preds = torch.argmax(model(images), dim=1)
+        for class_id in class_ids:
+            pred_mask = preds == class_id
+            target_mask = labels == class_id
+            intersection[class_id] += (pred_mask & target_mask).sum().item()
+            union[class_id] += pred_mask.sum().item() + target_mask.sum().item()
+    results: dict[int, float | None] = {}
+    for class_id in class_ids:
+        if union[class_id] == 0:
+            results[class_id] = None
+        else:
+            results[class_id] = float((2.0 * intersection[class_id] + eps) / (union[class_id] + eps))
+    return results
+
+
+def should_log_class_metrics(epoch: int, num_epochs: int, every: int) -> bool:
+    if every <= 0:
+        return False
+    return epoch == 1 or epoch == num_epochs or epoch % every == 0
+
+
+def log_class_metrics(
+    epoch: int,
+    split: str,
+    class_dice: dict[int, float | None],
+    class_metrics_logger: ClassMetricsLogger,
+    logger,
+) -> None:
+    rows = []
+    parts = []
+    for class_id in sorted(class_dice):
+        dice = class_dice[class_id]
+        class_name = LABEL_NAMES.get(class_id, f"class_{class_id}")
+        rows.append(
+            {
+                "epoch": epoch,
+                "split": split,
+                "class_id": class_id,
+                "class_name": class_name,
+                "dice": round(dice, 4) if dice is not None else "",
+            }
+        )
+        dice_text = f"{dice:.4f}" if dice is not None else "N/A"
+        parts.append(f"{class_name}={dice_text}")
+    class_metrics_logger.log_rows(rows)
+    logger.info(f"Epoch [{epoch:03d}] class dice [{split}]: " + ", ".join(parts))
+
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
@@ -224,6 +288,9 @@ def main():
     num_classes = int(model_cfg["class_nums"])
     hidden_channels = int(model_cfg["hidden_channels"])
     num_epochs = int(hyper_cfg["num_epochs"])
+    class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
+    class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
+    metric_class_ids = tuple(int(v) for v in train_cfg.get("metric_class_ids", EVAL_CLASS_IDS))
 
     train_set = SynapseSliceDataset(data_dir, "train", image_size, num_classes)
     val_set = SynapseSliceDataset(data_dir, "val", image_size, num_classes)
@@ -269,10 +336,18 @@ def main():
     logger.info(f"Experiment: {run.name}")
     logger.info(f"Run dir: {run.run_dir}")
 
-    with CsvMetricsLogger(run.history_path) as metrics_logger:
+    split_loaders = {"train": train_loader, "val": val_loader}
+
+    with CsvMetricsLogger(run.history_path) as metrics_logger, ClassMetricsLogger(
+        run.run_dir / "class_metrics.csv"
+    ) as class_metrics_logger:
         logger.info(f"Device: {device}")
         logger.info("Model: AttentionGateUnet")
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
+        if class_metrics_every > 0:
+            logger.info(
+                f"Class metrics every {class_metrics_every} epochs on splits: {class_metrics_splits}"
+            )
 
         for epoch in range(1, num_epochs + 1):
             start = time.time()
@@ -304,6 +379,18 @@ def main():
             }
             ckpt_mgr.save_last(epoch, state)
             ckpt_mgr.maybe_save_best(val_dice, epoch, state)
+
+            if should_log_class_metrics(epoch, num_epochs, class_metrics_every):
+                for split in class_metrics_splits:
+                    loader = split_loaders.get(split)
+                    if loader is None:
+                        continue
+                    class_dice = compute_per_class_dice(
+                        model, loader, device, metric_class_ids
+                    )
+                    log_class_metrics(
+                        epoch, split, class_dice, class_metrics_logger, logger
+                    )
 
     update_training_summary(
         run.summary_path,

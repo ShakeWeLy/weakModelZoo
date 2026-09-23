@@ -59,6 +59,9 @@ FALLBACK_COLORS = ["#95A5A6", "#34495E", "#F39C12", "#C0392B", "#27AE60"]
 
 FOREGROUND_CLASS_IDS = tuple(class_id for class_id in LABEL_NAMES if class_id != 0)
 
+# 与论文评估/analysis 脚本保持一致的主要器官类别
+EVAL_CLASS_IDS = (1, 2, 3, 4, 6, 7, 8, 11)
+
 
 def class_color(class_id: int) -> str:
     if class_id in ORGAN_COLORS:
