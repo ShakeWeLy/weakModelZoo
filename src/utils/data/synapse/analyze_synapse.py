@@ -1,7 +1,7 @@
 """分析 Synapse 3D NIfTI 数据，生成 train/val/test 2D 数据集。
 
 用法：
-    python examples/testsCode/analyze_synapse.py --save-slices
+    python src/utils/data/synapse/analyze_synapse.py --save-slices
 """
 
 from __future__ import annotations
@@ -15,22 +15,13 @@ import nibabel as nib
 import numpy as np
 from scipy.ndimage import zoom
 
+from labels import LABEL_NAMES
 
-LABEL_NAMES = {
-    0: "background",
-    1: "spleen",
-    2: "right_kidney",
-    3: "left_kidney",
-    4: "gallbladder",
-    5: "esophagus",
-    6: "liver",
-    7: "stomach",
-    8: "aorta",
-}
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 def parse_args() -> argparse.Namespace:
-    root = Path(__file__).resolve().parents[2]
+    root = PROJECT_ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--training-dir", type=Path,
                         default=root / "data" / "synapse_RawData" / "Training")

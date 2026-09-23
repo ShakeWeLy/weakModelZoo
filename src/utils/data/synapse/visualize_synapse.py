@@ -1,14 +1,9 @@
 """可视化 Synapse 2D 切片数据，生成论文用图。
 
 用法：
-    # 单张切片 overlay
-    python examples/testsCode/visualize_synapse.py --case 0001 --slice 0020
-
-    # 生成论文示例图（train/val/test 各若干张）
-    python examples/testsCode/visualize_synapse.py --paper-figure
-
-    # 数据集统计图
-    python examples/testsCode/visualize_synapse.py --stats-figure
+    python src/utils/data/synapse/visualize_synapse.py --case 0001 --slice 0020
+    python src/utils/data/synapse/visualize_synapse.py --paper-figure
+    python src/utils/data/synapse/visualize_synapse.py --stats-figure
 """
 
 from __future__ import annotations
@@ -23,31 +18,12 @@ import matplotlib.patches as mpatches
 import numpy as np
 from matplotlib.colors import ListedColormap
 
+from labels import FOREGROUND_CLASS_IDS, LABEL_NAMES, ORGAN_COLORS, class_color, make_overlay
 
-ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = ROOT / "data" / "synapse_processed"
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+DATA_DIR = PROJECT_ROOT / "data" / "synapse_processed"
 
-ORGAN_NAMES = {
-    1: "Spleen",
-    2: "Right Kidney",
-    3: "Left Kidney",
-    4: "Gallbladder",
-    5: "Esophagus",
-    6: "Liver",
-    7: "Stomach",
-    8: "Aorta",
-}
-
-ORGAN_COLORS = {
-    1: "#E74C3C",
-    2: "#2ECC71",
-    3: "#3498DB",
-    4: "#F1C40F",
-    5: "#9B59B6",
-    6: "#E67E22",
-    7: "#1ABC9C",
-    8: "#EC407A",
-}
+ORGAN_NAMES = {class_id: LABEL_NAMES[class_id].replace("_", " ").title() for class_id in FOREGROUND_CLASS_IDS}
 
 
 def setup_paper_style():
@@ -91,17 +67,6 @@ def find_slice(split: str, case_id: str, slice_id: str | None = None) -> tuple[P
     return image_path, label_path if label_path and label_path.exists() else None
 
 
-def make_overlay(image: np.ndarray, label: np.ndarray, alpha: float = 0.45) -> np.ndarray:
-    rgb = np.stack([image, image, image], axis=-1)
-    for class_id, color in ORGAN_COLORS.items():
-        mask = label == class_id
-        if not np.any(mask):
-            continue
-        color_rgb = np.array(plt.matplotlib.colors.to_rgb(color))
-        rgb[mask] = (1 - alpha) * rgb[mask] + alpha * color_rgb
-    return np.clip(rgb, 0, 1)
-
-
 def plot_legend(ax):
     patches = [
         mpatches.Patch(color=color, label=ORGAN_NAMES[class_id])
@@ -122,7 +87,9 @@ def plot_single(case_id: str, slice_id: str | None, split: str, output: Path):
         axes[0].set_title("(a) CT Image")
         axes[0].axis("off")
 
-        axes[1].imshow(label, cmap=ListedColormap(["#000000"] + list(ORGAN_COLORS.values())), vmin=0, vmax=8)
+        present_ids = sorted(int(v) for v in np.unique(label))
+        gt_colors = [ORGAN_COLORS.get(class_id, class_color(class_id)) for class_id in present_ids]
+        axes[1].imshow(label, cmap=ListedColormap(gt_colors), vmin=min(present_ids), vmax=max(present_ids))
         axes[1].set_title("(b) Ground Truth")
         axes[1].axis("off")
 
@@ -236,7 +203,7 @@ def parse_args():
     parser.add_argument("--split", choices=["train", "val", "test"], default="train")
     parser.add_argument("--case", default="0001")
     parser.add_argument("--slice", default=None, help="例如 0020")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs" / "figures" / "synapse")
+    parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "figures" / "synapse")
     parser.add_argument("--paper-figure", action="store_true")
     parser.add_argument("--stats-figure", action="store_true")
     return parser.parse_args()

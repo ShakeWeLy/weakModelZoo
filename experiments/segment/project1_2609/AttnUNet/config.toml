@@ -27,7 +27,9 @@ device = "cuda"
 [test]
 data_dir = "data/synapse_processed"
 device = "cuda"
-splits = ["val", "test"]
+splits = ["train", "val", "test"]
 save_predictions = true
+save_predictions_splits = ["val"]
 save_visualizations = true
+save_visualizations_splits = ["val", "test"]
 visualize_num = 5

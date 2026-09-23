@@ -104,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).with_name("config.toml"),
     )
-    parser.add_argument("--split", choices=["val", "test"], default=None)
+    parser.add_argument("--split", choices=["train", "val", "test"], default=None)
     parser.add_argument("--device", default=None)
     return parser.parse_args()
 
@@ -309,6 +309,12 @@ def summarize_metrics(class_metrics: dict[int, dict[str, list[float]]], num_clas
     }
 
 
+def split_enabled(split: str, configured: list[str] | None, default_splits: list[str]) -> bool:
+    if configured is None:
+        return split in default_splits
+    return split in configured
+
+
 def print_summary(summary: dict) -> None:
     split = summary["split"]
     print(f"\n===== {split.upper()} =====")
@@ -345,8 +351,12 @@ def main():
     batch_size = int(dataset_cfg["batch_size"])
     num_workers = int(dataset_cfg["num_workers"])
     splits = [args.split] if args.split else test_cfg.get("splits", ["val", "test"])
-    save_predictions = bool(test_cfg.get("save_predictions", True))
-    save_visualizations = bool(test_cfg.get("save_visualizations", True))
+    default_prediction_splits = ["val", "test"]
+    default_visualization_splits = ["val", "test"]
+    prediction_splits = test_cfg.get("save_predictions_splits")
+    visualization_splits = test_cfg.get("save_visualizations_splits")
+    save_predictions_default = bool(test_cfg.get("save_predictions", True))
+    save_visualizations_default = bool(test_cfg.get("save_visualizations", True))
     visualize_num = int(test_cfg.get("visualize_num", 5))
 
     if not checkpoint_path.exists():
@@ -362,6 +372,12 @@ def main():
     print(f"Predictions dir: {output_dir}")
 
     for split in splits:
+        save_predictions = save_predictions_default and split_enabled(
+            split, prediction_splits, default_prediction_splits
+        )
+        save_visualizations = save_visualizations_default and split_enabled(
+            split, visualization_splits, default_visualization_splits
+        )
         dataset = InferenceDataset(data_dir, split, image_size)
         loader = DataLoader(
             dataset,
@@ -407,8 +423,14 @@ def main():
 
     if readme_rows:
         paper_metrics_path = run.run_dir / "paper_metrics.csv"
+        fieldnames: list[str] = []
+        seen_fields: set[str] = set()
+        for row in readme_rows:
+            for key in row:
+                if key not in seen_fields:
+                    fieldnames.append(key)
+                    seen_fields.add(key)
         with paper_metrics_path.open("w", newline="", encoding="utf-8-sig") as f:
-            fieldnames = list(readme_rows[0].keys())
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(readme_rows)
