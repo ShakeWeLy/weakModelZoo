@@ -54,13 +54,22 @@ PSC-UNet/runs/2026-09-23_001_PSC-UNet/
         └── summary.json
 ```
 
+## 版本
+
+| 配置 | 说明 |
+| ---- | ---- |
+| `config.toml`（V3） | **仅 8 器官**：`class_nums=9`，`label_map=eval8`，训练/预测均为 9 类 |
+| `config_v2.toml`（V2） | 14 类训练，best 按 8 器官 `val_eval_dice` 选模型 |
+
 ## 说明
 
 - 数据目录：`data/synapse_processed`
-- 损失函数：**14 类加权 Dice Loss**（`dice_class_weights`，胰腺等小类权重更高）
-- 优化器默认 **Adam + lr=1e-4**；`best.pth` 按 **论文 8 器官** `val_eval_dice` 保存
-- **Early stopping**：`early_stopping_patience=50`（val_eval_dice 无提升则停）
-- `history.csv` 含 `val_eval_dice`（8 器官）与 `val_dice`（13 前景类均值）
+- **V3**：原始 GT 中非 8 器官（食管/IVC/门静脉/肾上腺等）在训练时映射为背景；模型输出 9 类
+- **V3 类映射**（模型 ID → 器官）：`1 spleen, 2 rk, 3 lk, 4 gb, 5 liver, 6 stomach, 7 aorta, 8 pancreas`
+- 损失函数：**加权 Dice Loss**（`dice_class_weights`）
+- 优化器默认 **Adam + lr=1e-4**；`best.pth` 按 `val_eval_dice` 保存
+- **Early stopping**：`early_stopping_patience=50`
+- V3 下 `val_dice` 与 `val_eval_dice` 均为 8 器官均值
 - `image_size` 需能被 **32** 整除，且 `image_size/4` 能被 **7**（Swin window_size）整除，默认 224
 - 灰度输入默认 `in_channels=1`；若设 `repeat_gray_to_rgb=true`，会自动 repeat 为 3 通道
 - 每 `class_metrics_every` 个 epoch 记录全部 13 个前景类 Dice 到 `class_metrics.csv`

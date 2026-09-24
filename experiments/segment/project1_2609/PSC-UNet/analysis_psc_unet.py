@@ -26,12 +26,14 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.utils.data.synapse.labels import (
-    ALL_METRIC_CLASS_IDS,
-    LABEL_NAMES,
-    LABEL_NAMES_CN,
+    EVAL_MODEL_TO_ORIGINAL,
+    apply_label_map,
+    build_organ_metrics,
     class_color,
     make_overlay,
     metric_class_name,
+    metric_class_name_cn,
+    remap_label_from_eval_model,
 )
 from src.utils.logger import resolve_experiment_run, update_evaluation_summary
 from src.utils.segmentation_metrics import aggregate_metric_lists, compute_binary_metrics
@@ -41,9 +43,6 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore
 
-
-ORGAN_METRICS = {class_id: metric_class_name(class_id) for class_id in ALL_METRIC_CLASS_IDS}
-ORGAN_NAMES_CN = {metric_class_name(class_id): LABEL_NAMES_CN[class_id] for class_id in ALL_METRIC_CLASS_IDS}
 
 METRIC_KEYS = (
     "dice", "iou", "precision", "recall",
@@ -66,6 +65,14 @@ def load_psc_unet_class():
 PSC_UNet = load_psc_unet_class()
 
 
+def build_organ_names_cn_from_metrics(organ_metrics: dict[int, str]) -> dict[str, str]:
+    names_cn: dict[str, str] = {}
+    for class_id, organ_name in organ_metrics.items():
+        original_id = EVAL_MODEL_TO_ORIGINAL.get(class_id, class_id)
+        names_cn[organ_name] = metric_class_name_cn(original_id)
+    return names_cn
+
+
 class InferenceDataset(Dataset):
     def __init__(
         self,
@@ -73,11 +80,13 @@ class InferenceDataset(Dataset):
         split: str,
         image_size: int,
         repeat_gray_to_rgb: bool = False,
+        label_map: str | None = None,
     ):
         self.image_dir = data_dir / split / "images"
         self.label_dir = data_dir / split / "labels"
         self.image_size = image_size
         self.repeat_gray_to_rgb = repeat_gray_to_rgb
+        self.label_map = label_map
         self.samples = sorted(self.image_dir.glob("*.npy"))
         if not self.samples:
             raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
@@ -100,7 +109,7 @@ class InferenceDataset(Dataset):
 
         label_path = self.label_dir / image_path.name
         if label_path.exists():
-            label = np.load(label_path).astype("int64")
+            label = apply_label_map(np.load(label_path).astype("int64"), self.label_map)
             label = torch.from_numpy(label).unsqueeze(0).unsqueeze(0).float()
             label = F.interpolate(
                 label,
@@ -190,9 +199,10 @@ def _organ_slice_metrics(
     pred: np.ndarray,
     label: np.ndarray,
     total_pixels: int,
+    organ_metrics: dict[int, str],
 ) -> dict[int, dict[str, Any]]:
     results: dict[int, dict[str, Any]] = {}
-    for class_id in ORGAN_METRICS:
+    for class_id in organ_metrics:
         pred_mask = pred == class_id
         target_mask = label == class_id
         if target_mask.sum() == 0 and pred_mask.sum() == 0:
@@ -212,9 +222,13 @@ def _metrics_to_row(prefix: str, organ_name: str, metrics: dict[str, Any]) -> di
     return row
 
 
-def _pred_only_stats(pred: np.ndarray, total_pixels: int) -> dict[int, dict[str, Any]]:
+def _pred_only_stats(
+    pred: np.ndarray,
+    total_pixels: int,
+    organ_metrics: dict[int, str],
+) -> dict[int, dict[str, Any]]:
     stats: dict[int, dict[str, Any]] = {}
-    for class_id in ORGAN_METRICS:
+    for class_id in organ_metrics:
         area = int((pred == class_id).sum())
         if area == 0:
             continue
@@ -234,12 +248,26 @@ def _present_class_ids(*masks: np.ndarray | None) -> list[int]:
     return sorted(present)
 
 
+def _visualization_masks(
+    label: np.ndarray | None,
+    pred: np.ndarray,
+    label_map: str | None,
+) -> tuple[np.ndarray | None, np.ndarray]:
+    if label_map == "eval8":
+        pred_viz = remap_label_from_eval_model(pred)
+        label_viz = remap_label_from_eval_model(label) if label is not None else None
+        return label_viz, pred_viz
+    return label, pred
+
+
 def save_overlay(
     image: np.ndarray,
     label: np.ndarray | None,
     pred: np.ndarray,
-    organ_metrics: dict[int, dict[str, Any]] | None,
+    organ_slice_metrics: dict[int, dict[str, Any]] | None,
     output_path: Path,
+    organ_metrics: dict[int, str],
+    label_map: str | None = None,
     has_label: bool = True,
 ) -> None:
     import matplotlib.patches as mpatches
@@ -266,15 +294,16 @@ def save_overlay(
     ax_img.imshow(image, cmap="gray", vmin=0, vmax=1)
     ax_img.set_title("Image")
     ax_img.axis("off")
-    if ax_gt is not None and label is not None:
-        ax_gt.imshow(make_overlay(image, label))
+    label_viz, pred_viz = _visualization_masks(label, pred, label_map)
+    if ax_gt is not None and label_viz is not None:
+        ax_gt.imshow(make_overlay(image, label_viz))
         ax_gt.set_title("Ground Truth")
         ax_gt.axis("off")
-    ax_pred.imshow(make_overlay(image, pred))
+    ax_pred.imshow(make_overlay(image, pred_viz))
     ax_pred.set_title("Prediction")
     ax_pred.axis("off")
 
-    present_ids = _present_class_ids(label, pred)
+    present_ids = _present_class_ids(label_viz, pred_viz)
     ax_legend.axis("off")
     if present_ids:
         legend_handles = [
@@ -295,18 +324,18 @@ def save_overlay(
     lines = ["Per-organ metrics", "=" * 34]
     if not has_label:
         lines = ["Prediction volume (no GT)", "=" * 34]
-        pred_stats = _pred_only_stats(pred, pred.size)
+        pred_stats = _pred_only_stats(pred, pred.size, organ_metrics)
         for class_id, stats in pred_stats.items():
-            organ_name = ORGAN_METRICS[class_id]
+            organ_name = organ_metrics[class_id]
             lines.append(
                 f"[{organ_name}]  {stats['pred_area']}px  ({stats['pred_percent']:.2f}%)"
             )
         if not pred_stats:
             lines.append("No evaluated organ predicted.")
-    elif organ_metrics:
+    elif organ_slice_metrics:
         overall = {key: [] for key in ("dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio")}
-        for class_id, metrics in organ_metrics.items():
-            organ_name = ORGAN_METRICS[class_id]
+        for class_id, metrics in organ_slice_metrics.items():
+            organ_name = organ_metrics[class_id]
             lines.append(f"[{organ_name}]")
             lines.append(
                 f"  D {_fmt_metric(metrics['dice'])}  "
@@ -367,6 +396,9 @@ def run_split(
     output_dir: Path,
     split: str,
     num_classes: int,
+    organ_metrics: dict[int, str],
+    organ_names_cn: dict[str, str],
+    label_map: str | None,
     save_predictions: bool,
     save_visualizations: bool,
     visualize_num: int,
@@ -405,10 +437,10 @@ def run_split(
 
             organ_slice_metrics: dict[int, dict[str, Any]] = {}
             if has_label:
-                organ_slice_metrics = _organ_slice_metrics(pred, label, total_pixels)
+                organ_slice_metrics = _organ_slice_metrics(pred, label, total_pixels, organ_metrics)
                 slice_overall = {key: [] for key in ("dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio")}
                 for class_id, metrics in organ_slice_metrics.items():
-                    organ_name = ORGAN_METRICS[class_id]
+                    organ_name = organ_metrics[class_id]
                     class_metrics.setdefault(class_id, {key: [] for key in METRIC_KEYS})
                     for key in METRIC_KEYS:
                         value = metrics.get(key)
@@ -421,7 +453,7 @@ def run_split(
                         "slice_name": name,
                         "split": split,
                         "organ": organ_name,
-                        "organ_cn": ORGAN_NAMES_CN[organ_name],
+                        "organ_cn": organ_names_cn[organ_name],
                         **{key: metrics.get(key, "") for key in METRIC_KEYS},
                     })
 
@@ -430,22 +462,32 @@ def run_split(
 
                 if save_visualizations and visualized < visualize_num:
                     save_overlay(
-                        image, label, pred, organ_slice_metrics,
+                        image,
+                        label,
+                        pred,
+                        organ_slice_metrics,
                         vis_dir / f"{Path(name).stem}.png",
+                        organ_metrics,
+                        label_map=label_map,
                         has_label=True,
                     )
                     visualized += 1
             elif save_visualizations and visualized < visualize_num:
                 save_overlay(
-                    image, None, pred, None,
+                    image,
+                    None,
+                    pred,
+                    None,
                     vis_dir / f"{Path(name).stem}.png",
+                    organ_metrics,
+                    label_map=label_map,
                     has_label=False,
                 )
                 visualized += 1
 
             slice_rows.append(row)
 
-    summary = summarize_metrics(class_metrics, num_classes)
+    summary = summarize_metrics(class_metrics, num_classes, organ_metrics, organ_names_cn)
     summary["split"] = split
     summary["num_slices"] = len(slice_rows)
     summary["num_labeled_slices"] = sum(1 for row in slice_rows if row["has_label"])
@@ -510,14 +552,19 @@ def run_split(
     return summary
 
 
-def summarize_metrics(class_metrics: dict[int, dict[str, list[float | None]]], num_classes: int) -> dict:
+def summarize_metrics(
+    class_metrics: dict[int, dict[str, list[float | None]]],
+    num_classes: int,
+    organ_metrics: dict[int, str],
+    organ_names_cn: dict[str, str],
+) -> dict:
     per_organ: dict[str, dict[str, Any]] = {}
     pooled: dict[str, list[float | None]] = {key: [] for key in METRIC_KEYS}
 
-    for class_id, organ_name in ORGAN_METRICS.items():
+    for class_id, organ_name in organ_metrics.items():
         values = class_metrics.get(class_id, {})
         organ_summary: dict[str, Any] = {
-            "name_cn": ORGAN_NAMES_CN[organ_name],
+            "name_cn": organ_names_cn[organ_name],
             "num_slices": len(values.get("dice", [])),
         }
         for key in METRIC_KEYS:
@@ -602,7 +649,7 @@ def merge_evaluation_splits(summary_path: Path, new_splits: list[dict]) -> dict:
     return evaluation
 
 
-def rebuild_paper_metrics(run_dir: Path) -> list[dict[str, str]]:
+def rebuild_paper_metrics(run_dir: Path, organ_names_cn: dict[str, str] | None = None) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for split in ("train", "val", "test"):
         summary_path = run_dir / "predictions" / split / "summary.json"
@@ -622,7 +669,7 @@ def rebuild_paper_metrics(run_dir: Path) -> list[dict[str, str]]:
             "FN ratio (%)": f"{summary.get('mean_fn_ratio_percent', 0):.2f}",
         }
         for organ_name, metrics in summary.get("per_organ", {}).items():
-            cn = ORGAN_NAMES_CN[organ_name]
+            cn = metrics.get("name_cn") or (organ_names_cn or {}).get(organ_name, organ_name)
             row[f"{cn} Dice (%)"] = (
                 f"{metrics['dice_percent']:.2f}" if metrics.get("dice_percent") is not None else ""
             )
@@ -652,6 +699,9 @@ def main():
     batch_size = int(dataset_cfg["batch_size"])
     num_workers = int(dataset_cfg["num_workers"])
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
+    label_map = model_cfg.get("label_map")
+    organ_metrics = build_organ_metrics(label_map)
+    organ_names_cn = build_organ_names_cn_from_metrics(organ_metrics)
     splits = [args.split] if args.split else test_cfg.get("splits", ["val", "test"])
     default_prediction_splits = ["val", "test"]
     default_visualization_splits = ["val", "test"]
@@ -672,6 +722,7 @@ def main():
     print("Model: PSC-UNet")
     print(f"Checkpoint: {checkpoint_path}")
     print(f"Predictions dir: {output_dir}")
+    print(f"Classes: {int(model_cfg['class_nums'])} | label_map: {label_map or 'none'}")
 
     for split in splits:
         save_predictions = save_predictions_default and split_enabled(
@@ -680,7 +731,13 @@ def main():
         save_visualizations = save_visualizations_default and split_enabled(
             split, visualization_splits, default_visualization_splits
         )
-        dataset = InferenceDataset(data_dir, split, image_size, repeat_gray_to_rgb=repeat_gray_to_rgb)
+        dataset = InferenceDataset(
+            data_dir,
+            split,
+            image_size,
+            repeat_gray_to_rgb=repeat_gray_to_rgb,
+            label_map=label_map,
+        )
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -695,6 +752,9 @@ def main():
             output_dir=output_dir,
             split=split,
             num_classes=int(model_cfg["class_nums"]),
+            organ_metrics=organ_metrics,
+            organ_names_cn=organ_names_cn,
+            label_map=label_map,
             save_predictions=save_predictions,
             save_visualizations=save_visualizations,
             visualize_num=visualize_num,
@@ -706,7 +766,7 @@ def main():
     evaluation["checkpoint"] = str(checkpoint_path)
     update_evaluation_summary(run.summary_path, evaluation)
 
-    readme_rows = rebuild_paper_metrics(run.run_dir)
+    readme_rows = rebuild_paper_metrics(run.run_dir, organ_names_cn)
     if readme_rows:
         paper_metrics_path = run.run_dir / "paper_metrics.csv"
         fieldnames: list[str] = []

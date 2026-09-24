@@ -59,8 +59,19 @@ FALLBACK_COLORS = ["#95A5A6", "#34495E", "#F39C12", "#C0392B", "#27AE60"]
 
 FOREGROUND_CLASS_IDS = tuple(class_id for class_id in LABEL_NAMES if class_id != 0)
 
-# 与论文评估保持一致的主要器官类别
+# 与论文评估保持一致的主要器官类别（原始 14 类标签空间）
 EVAL_CLASS_IDS = (1, 2, 3, 4, 6, 7, 8, 11)
+
+# 8 器官模型空间：0=背景，1..8 对应 EVAL_CLASS_IDS 顺序
+EVAL_MODEL_CLASS_NUM = 9
+EVAL_MODEL_CLASS_IDS = tuple(range(1, len(EVAL_CLASS_IDS) + 1))
+EVAL_MODEL_TO_ORIGINAL = {
+    model_id: original_id for model_id, original_id in enumerate(EVAL_CLASS_IDS, start=1)
+}
+ORIGINAL_TO_EVAL_MODEL = {0: 0, **{original_id: model_id for model_id, original_id in EVAL_MODEL_TO_ORIGINAL.items()}}
+_ORIGINAL_TO_EVAL_MODEL_LUT = np.zeros(14, dtype=np.int64)
+for original_id, model_id in ORIGINAL_TO_EVAL_MODEL.items():
+    _ORIGINAL_TO_EVAL_MODEL_LUT[original_id] = model_id
 
 # 全量前景类别（训练监控 / 分析指标 / 可视化）
 ALL_METRIC_CLASS_IDS = FOREGROUND_CLASS_IDS
@@ -76,6 +87,53 @@ def metric_class_name_cn(class_id: int) -> str:
 
 def build_metric_class_map() -> dict[int, str]:
     return {class_id: metric_class_name(class_id) for class_id in ALL_METRIC_CLASS_IDS}
+
+
+def build_eval_model_metric_class_map() -> dict[int, str]:
+    return {
+        model_id: metric_class_name(EVAL_MODEL_TO_ORIGINAL[model_id])
+        for model_id in EVAL_MODEL_CLASS_IDS
+    }
+
+
+def build_organ_metrics(label_map: str | None = None) -> dict[int, str]:
+    if label_map == "eval8":
+        return build_eval_model_metric_class_map()
+    return build_metric_class_map()
+
+
+def eval_model_class_name(model_id: int) -> str:
+    original_id = EVAL_MODEL_TO_ORIGINAL.get(model_id)
+    if original_id is None:
+        return f"class_{model_id}"
+    return metric_class_name(original_id)
+
+
+def eval_model_class_name_cn(model_id: int) -> str:
+    original_id = EVAL_MODEL_TO_ORIGINAL.get(model_id)
+    if original_id is None:
+        return f"class_{model_id}"
+    return metric_class_name_cn(original_id)
+
+
+def remap_label_to_eval_model(label: np.ndarray) -> np.ndarray:
+    """将原始 14 类标签映射为 9 类（背景 + 8 器官），非评估类置为背景。"""
+    clipped = np.clip(label, 0, _ORIGINAL_TO_EVAL_MODEL_LUT.size - 1)
+    return _ORIGINAL_TO_EVAL_MODEL_LUT[clipped]
+
+
+def remap_label_from_eval_model(label: np.ndarray) -> np.ndarray:
+    """将 9 类模型标签还原为原始器官 ID，便于沿用 ORGAN_COLORS 可视化。"""
+    output = np.zeros_like(label, dtype=label.dtype)
+    for model_id, original_id in EVAL_MODEL_TO_ORIGINAL.items():
+        output[label == model_id] = original_id
+    return output
+
+
+def apply_label_map(label: np.ndarray, label_map: str | None) -> np.ndarray:
+    if label_map == "eval8":
+        return remap_label_to_eval_model(label)
+    return label
 
 
 def class_color(class_id: int) -> str:

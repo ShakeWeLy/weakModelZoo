@@ -23,7 +23,14 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.data.synapse.labels import ALL_METRIC_CLASS_IDS, EVAL_CLASS_IDS, LABEL_NAMES
+from src.utils.data.synapse.labels import (
+    ALL_METRIC_CLASS_IDS,
+    EVAL_CLASS_IDS,
+    EVAL_MODEL_CLASS_IDS,
+    LABEL_NAMES,
+    apply_label_map,
+    eval_model_class_name,
+)
 from src.utils.logger import (
     CheckpointManager,
     ClassMetricsLogger,
@@ -61,12 +68,14 @@ class SynapseSliceDataset(Dataset):
         image_size: int,
         num_classes: int,
         repeat_gray_to_rgb: bool = False,
+        label_map: str | None = None,
     ):
         self.image_dir = data_dir / split / "images"
         self.label_dir = data_dir / split / "labels"
         self.image_size = image_size
         self.num_classes = num_classes
         self.repeat_gray_to_rgb = repeat_gray_to_rgb
+        self.label_map = label_map
         self.samples = sorted(self.image_dir.glob("*.npy"))
         if not self.samples:
             raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
@@ -79,6 +88,7 @@ class SynapseSliceDataset(Dataset):
         min_label = 0
         for image_path in self.samples:
             label = np.load(self.label_dir / image_path.name)
+            label = apply_label_map(label, self.label_map)
             max_label = max(max_label, int(label.max()))
             min_label = min(min_label, int(label.min()))
         if min_label < 0:
@@ -99,6 +109,7 @@ class SynapseSliceDataset(Dataset):
         label_path = self.label_dir / image_path.name
         image = np.load(image_path).astype("float32")
         label = np.load(label_path).astype("int64")
+        label = apply_label_map(label, self.label_map)
 
         image = torch.from_numpy(image).unsqueeze(0)
         label = torch.from_numpy(label)
@@ -344,12 +355,16 @@ def log_class_metrics(
     class_dice: dict[int, float | None],
     class_metrics_logger: ClassMetricsLogger,
     logger,
+    label_map: str | None = None,
 ) -> None:
     rows = []
     parts = []
     for class_id in sorted(class_dice):
         dice = class_dice[class_id]
-        class_name = LABEL_NAMES.get(class_id, f"class_{class_id}")
+        if label_map == "eval8":
+            class_name = eval_model_class_name(class_id)
+        else:
+            class_name = LABEL_NAMES.get(class_id, f"class_{class_id}")
         rows.append(
             {
                 "epoch": epoch,
@@ -401,14 +416,21 @@ def main():
     base_dim = int(model_cfg["base_dim"])
     in_channels = int(model_cfg.get("in_channels", 1))
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
+    label_map = model_cfg.get("label_map")
     swin_depths = tuple(int(v) for v in model_cfg.get("swin_depths", [2, 2, 2, 2]))
     class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
     class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
+    if label_map == "eval8":
+        default_metric_class_ids = EVAL_MODEL_CLASS_IDS
+        default_val_metric_class_ids = EVAL_MODEL_CLASS_IDS
+    else:
+        default_metric_class_ids = ALL_METRIC_CLASS_IDS
+        default_val_metric_class_ids = EVAL_CLASS_IDS
     metric_class_ids = tuple(
-        int(v) for v in train_cfg.get("metric_class_ids", ALL_METRIC_CLASS_IDS)
+        int(v) for v in train_cfg.get("metric_class_ids", default_metric_class_ids)
     )
     val_metric_class_ids = tuple(
-        int(v) for v in train_cfg.get("val_metric_class_ids", EVAL_CLASS_IDS)
+        int(v) for v in train_cfg.get("val_metric_class_ids", default_val_metric_class_ids)
     )
     dice_class_weights = build_dice_class_weights(
         num_classes,
@@ -423,10 +445,20 @@ def main():
     validate_image_size(image_size)
 
     train_set = SynapseSliceDataset(
-        data_dir, "train", image_size, num_classes, repeat_gray_to_rgb=repeat_gray_to_rgb
+        data_dir,
+        "train",
+        image_size,
+        num_classes,
+        repeat_gray_to_rgb=repeat_gray_to_rgb,
+        label_map=label_map,
     )
     val_set = SynapseSliceDataset(
-        data_dir, "val", image_size, num_classes, repeat_gray_to_rgb=repeat_gray_to_rgb
+        data_dir,
+        "val",
+        image_size,
+        num_classes,
+        repeat_gray_to_rgb=repeat_gray_to_rgb,
+        label_map=label_map,
     )
     train_loader = DataLoader(
         train_set,
@@ -470,7 +502,8 @@ def main():
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
         logger.info(
             f"Model: image_size={image_size}, in_channels={in_channels}, base_dim={base_dim}, "
-            f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}"
+            f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}, "
+            f"class_nums={num_classes}, label_map={label_map or 'none'}"
         )
         if class_metrics_every > 0:
             logger.info(
@@ -541,7 +574,7 @@ def main():
                         model, loader, device, metric_class_ids
                     )
                     log_class_metrics(
-                        epoch, split, class_dice, class_metrics_logger, logger
+                        epoch, split, class_dice, class_metrics_logger, logger, label_map
                     )
 
             if (

@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-24_002_PSC-UNet"
+name = "2026-09-24_003_PSC-UNet_V3"
 date = "2026-09-24"
-description = "weighted dice + adam + early stopping (14-class)"
+description = "8-organ only: 9-class head + eval8 label remap + weighted dice"
 runs_dir = "runs"
 
 [dataset]
@@ -18,20 +18,22 @@ optimizer = "adam"
 
 [model]
 base_dim = 32
-class_nums = 14
+class_nums = 9
 in_channels = 1
 swin_depths = [1, 1, 1, 1]
 repeat_gray_to_rgb = false
+# 将原始 14 类 GT 映射为 9 类（背景 + 8 器官）；非 8 器官像素视为背景
+label_map = "eval8"
 
 [train]
 data_dir = "data/synapse_processed"
 device = "cuda"
 class_metrics_every = 10
 class_metrics_splits = ["val", "train"]
-# best.pth / early stopping 按论文 8 器官平均 Dice
-val_metric_class_ids = [1, 2, 3, 4, 6, 7, 8, 11]
-# 训练仍用 14 类；权重对应 class 1..13，提高胰腺/胆囊/肾上腺等稀有类
-dice_class_weights = [1, 1, 1, 2.5, 2.5, 0.5, 1, 1.5, 1.5, 2.5, 5, 4, 4]
+# 模型空间 class 1..8，对应 spleen/rk/lk/gb/liver/stomach/aorta/pancreas
+val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+dice_class_weights = [1, 1, 1, 2.5, 1, 1, 1.5, 5]
 early_stopping_patience = 50
 early_stopping_min_delta = 0.0
 
