@@ -782,6 +782,7 @@ def main():
             writer.writerows(readme_rows)
         print(f"\n论文指标表已保存: {paper_metrics_path}")
         print(f"实验摘要已更新: {run.summary_path}")
+        print(f"Markdown 摘要已保存: {run.run_dir / 'summary.md'}")
 
 
 if __name__ == "__main__":

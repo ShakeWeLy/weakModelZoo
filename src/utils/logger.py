@@ -31,6 +31,7 @@ class ExperimentRun:
     ├── config.yaml
     ├── history.csv
     ├── summary.json
+    ├── summary.md
     ├── checkpoints/
     │   ├── best.pth
     │   └── last.pth
@@ -158,6 +159,7 @@ def update_training_summary(
         }
     )
     write_summary(summary_path, summary)
+    write_summary_md(summary_path.parent)
 
 
 def update_evaluation_summary(summary_path: Path, evaluation: Mapping[str, Any]) -> None:
@@ -168,6 +170,356 @@ def update_evaluation_summary(summary_path: Path, evaluation: Mapping[str, Any])
             summary = json.load(f)
     summary["evaluation"] = evaluation
     write_summary(summary_path, summary)
+    write_summary_md(summary_path.parent)
+
+
+def _fmt_summary_num(value: Any, decimals: int = 4) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number:.{decimals}f}"
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    path = Path(path)
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _format_summary_date_cn(date_str: str | None) -> str:
+    if not date_str:
+        return ""
+    try:
+        parsed = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return date_str
+    return f"{parsed.year}年{parsed.month}月{parsed.day}日"
+
+
+def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    if not rows:
+        return "_（无数据）_\n"
+    header_line = "| " + " | ".join(headers) + " |"
+    separator = "| " + " | ".join("---" for _ in headers) + " |"
+    body = "\n".join("| " + " | ".join(row) + " |" for row in rows)
+    return f"{header_line}\n{separator}\n{body}\n"
+
+
+ORGAN_METRICS_HEADERS = (
+    "organ",
+    "organ_cn",
+    "num_slices",
+    "dice_mean",
+    "dice_percent (%)",
+    "iou_mean",
+    "iou_percent (%)",
+    "precision_mean",
+    "precision_percent (%)",
+    "recall_mean",
+    "recall_percent (%)",
+    "fp_ratio_mean",
+    "fp_ratio_percent (%)",
+    "fn_ratio_mean",
+    "fn_ratio_percent (%)",
+    "hd95_mean",
+    "gt_area_mean",
+    "pred_area_mean",
+    "pred_gt_ratio_mean",
+    "gt_percent_mean",
+    "pred_percent_mean",
+)
+
+ORGAN_METRICS_SIMPLE_HEADERS = ("organ_cn", "num_slices", "Dice (%)", "IoU (%)", "HD95")
+
+
+def _organ_metrics_rows(rows: list[dict[str, str]], *, simple: bool = False) -> list[list[str]]:
+    table_rows: list[list[str]] = []
+    for row in rows:
+        if simple:
+            table_rows.append([
+                row.get("organ_cn", ""),
+                row.get("num_slices", ""),
+                _fmt_summary_num(row.get("dice_percent")),
+                _fmt_summary_num(row.get("iou_percent")),
+                _fmt_summary_num(row.get("hd95_mean")),
+            ])
+            continue
+        table_rows.append([
+            row.get("organ", ""),
+            row.get("organ_cn", ""),
+            row.get("num_slices", ""),
+            _fmt_summary_num(row.get("dice_mean")),
+            _fmt_summary_num(row.get("dice_percent")),
+            _fmt_summary_num(row.get("iou_mean")),
+            _fmt_summary_num(row.get("iou_percent")),
+            _fmt_summary_num(row.get("precision_mean")),
+            _fmt_summary_num(row.get("precision_percent")),
+            _fmt_summary_num(row.get("recall_mean")),
+            _fmt_summary_num(row.get("recall_percent")),
+            _fmt_summary_num(row.get("fp_ratio_mean")),
+            _fmt_summary_num(row.get("fp_ratio_percent")),
+            _fmt_summary_num(row.get("fn_ratio_mean")),
+            _fmt_summary_num(row.get("fn_ratio_percent")),
+            _fmt_summary_num(row.get("hd95_mean")),
+            _fmt_summary_num(row.get("gt_area_mean")),
+            _fmt_summary_num(row.get("pred_area_mean")),
+            _fmt_summary_num(row.get("pred_gt_ratio_mean")),
+            _fmt_summary_num(row.get("gt_percent_mean")),
+            _fmt_summary_num(row.get("pred_percent_mean")),
+        ])
+    return table_rows
+
+
+def _paper_metrics_from_evaluation(summary: Mapping[str, Any]) -> tuple[list[list[str]], list[str]]:
+    splits = summary.get("evaluation", {}).get("splits", [])
+    rows_by_split = {
+        item["split"]: item for item in splits if item.get("split") in {"train", "val"}
+    }
+    if not rows_by_split:
+        return [], []
+
+    organ_order: list[tuple[str, str]] = []
+    for split in ("train", "val"):
+        per_organ = rows_by_split.get(split, {}).get("per_organ", {})
+        for organ_name, metrics in per_organ.items():
+            cn = metrics.get("name_cn", organ_name)
+            token = (cn, organ_name)
+            if token not in organ_order:
+                organ_order.append(token)
+
+    fieldnames = [
+        "Dice (%)",
+        "IoU (%)",
+        "Precision (%)",
+        "Recall (%)",
+        "HD95",
+        "FP ratio (%)",
+        "FN ratio (%)",
+    ]
+    for cn, _ in organ_order:
+        fieldnames.extend([f"{cn} Dice (%)", f"{cn} IoU (%)"])
+
+    table_rows: list[list[str]] = []
+    for split in ("train", "val"):
+        item = rows_by_split.get(split)
+        if item is None or item.get("mean_dice_percent") is None:
+            continue
+        row = [
+            split,
+            _fmt_summary_num(item.get("mean_dice_percent")),
+            _fmt_summary_num(item.get("mean_iou_percent")),
+            _fmt_summary_num(item.get("mean_precision_percent")),
+            _fmt_summary_num(item.get("mean_recall_percent")),
+            _fmt_summary_num(item.get("mean_hd95")),
+            _fmt_summary_num(item.get("mean_fp_ratio_percent")),
+            _fmt_summary_num(item.get("mean_fn_ratio_percent")),
+        ]
+        per_organ = item.get("per_organ", {})
+        for _, organ_name in organ_order:
+            metrics = per_organ.get(organ_name, {})
+            row.append(_fmt_summary_num(metrics.get("dice_percent")))
+            row.append(_fmt_summary_num(metrics.get("iou_percent")))
+        table_rows.append(row)
+    return table_rows, fieldnames
+
+
+def _paper_metrics_rows(paper_metrics_path: Path) -> tuple[list[list[str]], list[str]]:
+    rows = _read_csv_rows(paper_metrics_path)
+    if not rows:
+        return [], []
+    fieldnames = [key for key in rows[0] if key != "split"]
+    table_rows: list[list[str]] = []
+    for row in rows:
+        if row.get("split") not in {"train", "val"}:
+            continue
+        table_rows.append([
+            row.get("split", ""),
+            *[_fmt_summary_num(row.get(field)) for field in fieldnames],
+        ])
+    return table_rows, fieldnames
+
+
+def _build_training_log_lines(
+    history_path: Path,
+    *,
+    total_epochs: int | None,
+    tail_epochs: int = 6,
+) -> list[str]:
+    rows = _read_csv_rows(history_path)
+    if not rows:
+        return []
+    lines: list[str] = []
+    for row in rows[-tail_epochs:]:
+        epoch = row.get("epoch", "")
+        total = total_epochs if total_epochs is not None else "?"
+        lines.append(
+            f"Epoch [{epoch}/{total}] "
+            f"train_loss={_fmt_summary_num(row.get('train_loss'))} "
+            f"train_dice={_fmt_summary_num(row.get('train_dice'))} "
+            f"val_loss={_fmt_summary_num(row.get('val_loss'))} "
+            f"val_dice={_fmt_summary_num(row.get('val_dice'))} "
+            f"time={_fmt_summary_num(row.get('seconds'), 1)}s"
+        )
+    return lines
+
+
+def _build_class_dice_lines(class_metrics_path: Path, epoch: int) -> list[str]:
+    rows = _read_csv_rows(class_metrics_path)
+    if not rows:
+        return []
+    lines: list[str] = []
+    epoch_text = str(epoch)
+    for split in ("val", "train"):
+        parts = [
+            f"{row['class_name']}={_fmt_summary_num(row.get('dice'))}"
+            for row in rows
+            if row.get("epoch") == epoch_text and row.get("split") == split
+        ]
+        if parts:
+            lines.append(f"Epoch [{epoch}] class dice [{split}]: " + ", ".join(parts))
+    return lines
+
+
+def _latest_class_metrics_epoch(class_metrics_path: Path, completed_epochs: int | None) -> int | None:
+    rows = _read_csv_rows(class_metrics_path)
+    if not rows:
+        return None
+    epochs = sorted({int(row["epoch"]) for row in rows if row.get("epoch")})
+    if completed_epochs is not None:
+        eligible = [epoch for epoch in epochs if epoch <= completed_epochs]
+        if eligible:
+            return eligible[-1]
+    return epochs[-1] if epochs else None
+
+
+def build_summary_markdown(run_dir: Path) -> str:
+    run_dir = Path(run_dir)
+    summary = {}
+    summary_path = run_dir / "summary.json"
+    if summary_path.exists():
+        with summary_path.open(encoding="utf-8") as f:
+            summary = json.load(f)
+
+    name = summary.get("name", run_dir.name)
+    date_cn = _format_summary_date_cn(summary.get("date"))
+    description = summary.get("description", "")
+    status = summary.get("status", "")
+    best_val_dice = summary.get("best_val_dice")
+    best_epoch = summary.get("best_epoch")
+    completed_epochs = summary.get("completed_epochs")
+    total_epochs = summary.get("total_epochs")
+
+    lines: list[str] = [
+        f"# {name}",
+        "",
+        f"> date: {date_cn}",
+    ]
+    if description:
+        lines.append(f"> description: {description}")
+    if status:
+        lines.append(f"> status: {status}")
+    if best_val_dice is not None:
+        best_epoch_text = best_epoch if best_epoch is not None else "?"
+        lines.append(
+            f"> best_val_dice: {_fmt_summary_num(best_val_dice)} (epoch {best_epoch_text})"
+        )
+    if completed_epochs is not None:
+        total_epochs_text = total_epochs if total_epochs is not None else "?"
+        lines.append(f"> completed_epochs: {completed_epochs} / {total_epochs_text}")
+    lines.extend(["", "### 1 训练收尾日志", "", "最近若干 epoch 的训练/验证指标，来源 `history.csv`。", ""])
+
+    training_lines = _build_training_log_lines(
+        run_dir / "history.csv",
+        total_epochs=total_epochs,
+        tail_epochs=7,
+    )
+    class_epoch = _latest_class_metrics_epoch(run_dir / "class_metrics.csv", completed_epochs)
+    if class_epoch is not None and training_lines:
+        class_lines = _build_class_dice_lines(run_dir / "class_metrics.csv", class_epoch)
+        enriched_lines: list[str] = []
+        for line in training_lines:
+            enriched_lines.append(line)
+            epoch_token = line.split("]", 1)[0].removeprefix("Epoch [")
+            epoch_value = epoch_token.split("/", 1)[0]
+            if epoch_value.isdigit() and int(epoch_value) == class_epoch:
+                enriched_lines.extend(class_lines)
+        training_lines = enriched_lines
+
+    if training_lines:
+        lines.extend(["```bash", *training_lines, "```", ""])
+    else:
+        lines.append("_（无 history.csv 数据）_\n")
+
+    paper_metrics_path = run_dir / "paper_metrics.csv"
+    paper_rows, paper_fields = _paper_metrics_from_evaluation(summary)
+    if not paper_rows and paper_metrics_path.exists():
+        paper_rows, paper_fields = _paper_metrics_rows(paper_metrics_path)
+
+    section_no = 2
+    if paper_rows:
+        lines.extend([
+            f"### {section_no} 整体指标对比（train / val）",
+            "",
+            "基于 best checkpoint 推理结果汇总；宏平均 Dice/IoU 等为 8 个目标器官均值（不含背景）。",
+            "百分比列单位为 %，数值保留四位小数。",
+            "",
+            _markdown_table(["split", *paper_fields], paper_rows),
+        ])
+        section_no += 1
+
+    for split in ("train", "val"):
+        organ_path = run_dir / "predictions" / split / "organ_metrics.csv"
+        organ_rows = _read_csv_rows(organ_path)
+        if not organ_rows:
+            continue
+        split_cn = "训练集" if split == "train" else "验证集"
+        lines.extend([
+            f"### {section_no} {split_cn}各器官详细指标",
+            "",
+            f"来源 `predictions/{split}/organ_metrics.csv`；"
+            "按器官聚合的切片级均值，`*_percent` 列单位为 %。",
+            "",
+            _markdown_table(list(ORGAN_METRICS_HEADERS), _organ_metrics_rows(organ_rows)),
+        ])
+        section_no += 1
+
+    simple_sections: list[str] = []
+    for split in ("train", "val"):
+        organ_path = run_dir / "predictions" / split / "organ_metrics.csv"
+        organ_rows = _read_csv_rows(organ_path)
+        if not organ_rows:
+            continue
+        split_cn = "训练集" if split == "train" else "验证集"
+        simple_sections.append(
+            f"**{split_cn}精简版**\n\n"
+            + _markdown_table(
+                list(ORGAN_METRICS_SIMPLE_HEADERS),
+                _organ_metrics_rows(organ_rows, simple=True),
+            )
+        )
+
+    if simple_sections:
+        lines.extend([
+            f"### {section_no} 各器官精简指标",
+            "",
+            "仅保留 Dice、IoU、HD95 与参与统计的切片数，便于快速对比。",
+            "",
+            *simple_sections,
+        ])
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_summary_md(run_dir: Path) -> Path:
+    run_dir = Path(run_dir)
+    summary_md_path = run_dir / "summary.md"
+    summary_md_path.write_text(build_summary_markdown(run_dir), encoding="utf-8")
+    return summary_md_path
 
 
 def _save_config_yaml(
