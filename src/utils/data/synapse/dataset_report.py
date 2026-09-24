@@ -3,6 +3,7 @@
 用法（项目根目录）：
     python src/utils/data/synapse/dataset_report.py
     python src/utils/data/synapse/dataset_report.py --data-dir data/synapse_processed --quality-samples 8
+    python src/utils/data/synapse/dataset_report.py --only-quality-samples --quality-samples all --quality-format png
 """
 
 from __future__ import annotations
@@ -15,11 +16,21 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import ndimage
 
-from labels import LABEL_NAMES, LABEL_NAMES_CN, ORGAN_COLORS, class_color, make_overlay
+from labels import (
+    FOREGROUND_CLASS_IDS,
+    LABEL_NAMES,
+    LABEL_NAMES_CN,
+    ORGAN_COLORS,
+    class_color,
+    make_overlay,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -64,7 +75,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "synapse_processed")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--splits", nargs="+", default=["train", "val", "test"])
-    parser.add_argument("--quality-samples", type=int, default=8)
+    parser.add_argument(
+        "--quality-samples",
+        type=str,
+        default="8",
+        help="抽检数量，或 all 表示全部带标签切片",
+    )
+    parser.add_argument(
+        "--quality-format",
+        type=str,
+        default="png",
+        choices=["png", "jpg", "jpeg", "webp", "pdf", "svg"],
+        help="质量抽检图输出格式",
+    )
+    parser.add_argument("--quality-dpi", type=int, default=200, help="质量抽检图 DPI")
+    parser.add_argument(
+        "--quality-legend",
+        type=str,
+        default="present",
+        choices=["present", "all", "none"],
+        help="图例：本图出现的类 / 全部前景类 / 不显示",
+    )
+    parser.add_argument(
+        "--only-quality-samples",
+        action="store_true",
+        help="仅生成质量抽检图，跳过低级统计与图表",
+    )
+    parser.add_argument(
+        "--quality-skip-existing",
+        action="store_true",
+        help="跳过已存在的质量抽检图（断点续跑）",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tiny-area-threshold", type=int, default=16)
     parser.add_argument("--fragmentation-threshold", type=int, default=5)
@@ -448,37 +489,114 @@ def plot_slices_per_case(rows: list[dict], output_path: Path) -> None:
     plt.close()
 
 
+def parse_quality_samples(value: str) -> int | None:
+    normalized = value.strip().lower()
+    if normalized in {"all", "0", "-1", "*"}:
+        return None
+    return int(value)
+
+
+def quality_sample_filename(record: SliceRecord, save_ext: str) -> str:
+    stem = Path(record.slice_name).stem
+    return f"{record.split}_{stem}.{save_ext}"
+
+
+def normalize_image_format(image_format: str) -> tuple[str, str]:
+    ext = image_format.lower().lstrip(".")
+    if ext == "jpg":
+        return "jpeg", "jpg"
+    return ext, ext
+
+
+def legend_class_ids(label: np.ndarray, legend_mode: str) -> list[int]:
+    if legend_mode == "none":
+        return []
+    if legend_mode == "all":
+        return list(FOREGROUND_CLASS_IDS)
+    return sorted(int(class_id) for class_id in np.unique(label) if int(class_id) != 0)
+
+
 def save_quality_samples(
     records: list[SliceRecord],
     output_dir: Path,
-    sample_count: int,
+    sample_count: int | None,
     seed: int,
+    image_format: str = "png",
+    dpi: int = 200,
+    legend_mode: str = "present",
+    skip_existing: bool = False,
 ) -> list[dict]:
+    import matplotlib.patches as mpatches
+    from matplotlib.gridspec import GridSpec
+
     labeled = [record for record in records if record.has_label]
     if not labeled:
         return []
-    rng = random.Random(seed)
-    chosen = rng.sample(labeled, k=min(sample_count, len(labeled)))
+    if sample_count is None:
+        chosen = sorted(labeled, key=lambda record: (record.split, record.case_id, record.slice_name))
+    else:
+        rng = random.Random(seed)
+        chosen = rng.sample(labeled, k=min(sample_count, len(labeled)))
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_plot_style()
+    save_format, save_ext = normalize_image_format(image_format)
     saved = []
-    for record in chosen:
+    total = len(chosen)
+    for index, record in enumerate(chosen, start=1):
+        out_path = output_dir / quality_sample_filename(record, save_ext)
+        if skip_existing and out_path.exists() and out_path.stat().st_size > 0:
+            saved.append(
+                {
+                    "split": record.split,
+                    "case_id": record.case_id,
+                    "slice_name": record.slice_name,
+                    "figure": str(out_path),
+                }
+            )
+            continue
+
         image = np.load(record.image_path)
         label = np.load(record.label_path)
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        class_ids = legend_class_ids(label, legend_mode)
+        show_legend = bool(class_ids)
+        fig_height = 5.4 if show_legend else 4.2
+        fig = plt.figure(figsize=(12, fig_height))
+        if show_legend:
+            grid = GridSpec(2, 3, height_ratios=[1, 0.14], hspace=0.18)
+            axes = [fig.add_subplot(grid[0, index]) for index in range(3)]
+            ax_legend = fig.add_subplot(grid[1, :])
+        else:
+            grid = GridSpec(1, 3)
+            axes = [fig.add_subplot(grid[0, index]) for index in range(3)]
+            ax_legend = None
+
         axes[0].imshow(image, cmap="gray", vmin=0, vmax=1)
         axes[0].set_title("Image")
         axes[0].axis("off")
-        max_label = int(label.max()) if label.size else 0
-        axes[1].imshow(label, cmap="tab20", vmin=0, vmax=max(max_label, 1))
+        axes[1].imshow(make_overlay(np.zeros_like(image), label))
         axes[1].set_title("Ground Truth")
         axes[1].axis("off")
         axes[2].imshow(make_overlay(image, label))
         axes[2].set_title("Overlay")
         axes[2].axis("off")
+        if ax_legend is not None:
+            legend_handles = [
+                mpatches.Patch(
+                    color=class_color(class_id),
+                    label=f"{class_id}:{display_name_en(class_id=class_id)}",
+                )
+                for class_id in class_ids
+            ]
+            ax_legend.axis("off")
+            ax_legend.legend(
+                handles=legend_handles,
+                loc="center",
+                ncol=min(7, len(legend_handles)),
+                fontsize=7.5,
+                frameon=False,
+            )
         fig.suptitle(f"{record.split} | {record.case_id} | {record.slice_name}", y=1.02)
-        out_path = output_dir / f"{record.split}_{record.case_id}_{Path(record.slice_name).stem}.png"
-        fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        fig.savefig(out_path, format=save_format, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
         saved.append(
             {
@@ -488,6 +606,8 @@ def save_quality_samples(
                 "figure": str(out_path),
             }
         )
+        if index == 1 or index % 25 == 0 or index == total:
+            print(f"[quality_samples] {index}/{total} -> {out_path.name}")
     return saved
 
 
@@ -503,6 +623,23 @@ def main() -> None:
     records = collect_slice_records(data_dir, args.splits)
     if not records:
         raise FileNotFoundError(f"未在 {data_dir} 找到切片数据")
+
+    quality_samples = save_quality_samples(
+        records,
+        quality_dir,
+        parse_quality_samples(args.quality_samples),
+        args.seed,
+        image_format=args.quality_format,
+        dpi=args.quality_dpi,
+        legend_mode=args.quality_legend,
+        skip_existing=args.quality_skip_existing,
+    )
+    if args.only_quality_samples:
+        print(f"数据目录: {data_dir}")
+        print(f"质量抽检图: {quality_dir}")
+        print(f"输出格式: {args.quality_format} | DPI: {args.quality_dpi} | 图例: {args.quality_legend}")
+        print(f"已生成 {len(quality_samples)} 张质量抽检图")
+        return
 
     case_split = load_case_split(data_dir)
     case_statistics = load_case_statistics(data_dir)
@@ -535,8 +672,6 @@ def main() -> None:
     class_distribution = build_class_distribution(accumulators, total_pixels_all_slices)
     ratio_rows = build_ratio_table(class_pixel_totals, background_pixels, foreground_pixels)
     case_ids, presence_rows = build_case_presence_matrix(case_presence, case_split)
-    quality_samples = save_quality_samples(records, quality_dir, args.quality_samples, args.seed)
-
     write_csv(output_dir / "overview.csv", [{"metric": k, "value": json.dumps(v, ensure_ascii=False)} for k, v in overview.items()])
     write_csv(output_dir / "slices_per_case.csv", slices_per_case)
     write_csv(output_dir / "class_distribution.csv", class_distribution)
@@ -571,7 +706,7 @@ def main() -> None:
     print(f"划分: {overview['cases_per_split']} / 切片: {overview['slices_per_split']}")
     print(f"类别分布表: {output_dir / 'class_distribution.csv'}")
     print(f"病例-器官矩阵: {output_dir / 'case_organ_presence.md'}")
-    print(f"质量抽检图: {quality_dir}")
+    print(f"质量抽检图: {quality_dir} ({len(quality_samples)} 张, {args.quality_format})")
     print(f"质量问题条目: {len(quality_issues)}")
 
 
