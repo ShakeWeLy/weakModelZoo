@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-24_001_PSC-UNet"
+name = "2026-09-24_002_PSC-UNet"
 date = "2026-09-24"
-description = "first psc-unet experiment"
+description = "weighted dice + adam + early stopping (14-class)"
 runs_dir = "runs"
 
 [dataset]
@@ -10,11 +10,11 @@ batch_size = 8
 num_workers = 1
 
 [hyperparameters]
-learning_rate = 0.05
+learning_rate = 0.0001
 weight_decay = 0.0001
 num_epochs = 300
 momentum = 0.9
-optimizer = "sgd"
+optimizer = "adam"
 
 [model]
 base_dim = 32
@@ -28,7 +28,12 @@ data_dir = "data/synapse_processed"
 device = "cuda"
 class_metrics_every = 10
 class_metrics_splits = ["val", "train"]
-# 默认记录全部 13 个前景类；若只关心论文 8 器官可改为 [1,2,3,4,6,7,8,11]
+# best.pth / early stopping 按论文 8 器官平均 Dice
+val_metric_class_ids = [1, 2, 3, 4, 6, 7, 8, 11]
+# 训练仍用 14 类；权重对应 class 1..13，提高胰腺/胆囊/肾上腺等稀有类
+dice_class_weights = [1, 1, 1, 2.5, 2.5, 0.5, 1, 1.5, 1.5, 2.5, 5, 4, 4]
+early_stopping_patience = 50
+early_stopping_min_delta = 0.0
 
 [test]
 data_dir = "data/synapse_processed"

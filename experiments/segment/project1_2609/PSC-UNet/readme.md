@@ -2,6 +2,14 @@
 
 在 Synapse 2D 切片上训练 PSC-UNet（并行 ResNet-34 + Swin + DFCM/WBEM）。
 
+## 模型
+
+
+|              |            |
+| ------------ | ---------- |
+| **PSC-UNet** | **8.75 M** |
+
+
 ## 运行
 
 每次训练前在 `config.toml` 中设置唯一的 `[experiments].name`：
@@ -49,7 +57,11 @@ PSC-UNet/runs/2026-09-23_001_PSC-UNet/
 ## 说明
 
 - 数据目录：`data/synapse_processed`
-- 损失函数：多类 Dice Loss（忽略背景类）
+- 损失函数：**14 类加权 Dice Loss**（`dice_class_weights`，胰腺等小类权重更高）
+- 优化器默认 **Adam + lr=1e-4**；`best.pth` 按 **论文 8 器官** `val_eval_dice` 保存
+- **Early stopping**：`early_stopping_patience=50`（val_eval_dice 无提升则停）
+- `history.csv` 含 `val_eval_dice`（8 器官）与 `val_dice`（13 前景类均值）
 - `image_size` 需能被 **32** 整除，且 `image_size/4` 能被 **7**（Swin window_size）整除，默认 224
 - 灰度输入默认 `in_channels=1`；若设 `repeat_gray_to_rgb=true`，会自动 repeat 为 3 通道
-- 每 `class_metrics_every` 个 epoch 记录各器官 Dice 到 `class_metrics.csv`
+- 每 `class_metrics_every` 个 epoch 记录全部 13 个前景类 Dice 到 `class_metrics.csv`
+
