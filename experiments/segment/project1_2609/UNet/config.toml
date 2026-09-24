@@ -1,31 +1,45 @@
+[experiments]
+name = "2026-09-24_001_UNet_V1"
+date = "2026-09-24"
+description = "8-organ only: 9-class head + eval8 label remap + weighted dice"
+runs_dir = "runs"
+
 [dataset]
 image_size = 224
 batch_size = 8
 num_workers = 1
 
 [hyperparameters]
-learning_rate = 0.05
+learning_rate = 0.0001
 weight_decay = 0.0001
 num_epochs = 300
 momentum = 0.9
-optimizer = "sgd"
+optimizer = "adam"
 
 [model]
 hidden_channels = 64
-class_nums = 14
+class_nums = 9
+# 将原始 14 类 GT 映射为 9 类（背景 + 8 器官）；非 8 器官像素视为背景
+label_map = "eval8"
 
 [train]
 data_dir = "data/synapse_processed"
-output_dir = "experiments/segment/project1_2609/UNet/outputs"
 device = "cuda"
-save_every = 50
+class_metrics_every = 10
+class_metrics_splits = ["val", "train"]
+# 模型空间 class 1..8，对应 spleen/rk/lk/gb/liver/stomach/aorta/pancreas
+val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+dice_class_weights = [1, 1, 1, 2.5, 1, 1, 1.5, 5]
+early_stopping_patience = 50
+early_stopping_min_delta = 0.0
 
 [test]
 data_dir = "data/synapse_processed"
-checkpoint = "experiments/segment/project1_2609/UNet/outputs/best_unet.pth"
-output_dir = "experiments/segment/project1_2609/UNet/outputs/analysis"
 device = "cuda"
-splits = ["val", "test"]
+splits = ["train", "val", "test"]
 save_predictions = true
+save_predictions_splits = ["train", "val", "test"]
 save_visualizations = true
-visualize_num = 5
+save_visualizations_splits = ["train", "val", "test"]
+visualize_num = 100

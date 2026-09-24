@@ -3,6 +3,7 @@
 用法（在项目根目录执行）：
     python experiments/segment/project1_2609/UNet/train_unet.py
     python experiments/segment/project1_2609/UNet/train_unet.py --config experiments/segment/project1_2609/UNet/config.toml
+    python experiments/segment/project1_2609/UNet/train_unet.py --epochs 1 --quick
 """
 
 from __future__ import annotations
@@ -22,7 +23,23 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.models.segment.unet.unet import UNet
-from src.utils.logger import CheckpointManager, CsvMetricsLogger, setup_file_logger
+from src.utils.data.synapse.labels import (
+    ALL_METRIC_CLASS_IDS,
+    EVAL_CLASS_IDS,
+    EVAL_MODEL_CLASS_IDS,
+    LABEL_NAMES,
+    apply_label_map,
+    eval_model_class_name,
+)
+from src.utils.logger import (
+    CheckpointManager,
+    ClassMetricsLogger,
+    CsvMetricsLogger,
+    create_experiment_run,
+    resolve_runs_root,
+    setup_file_logger,
+    update_training_summary,
+)
 
 try:
     import tomllib
@@ -31,11 +48,19 @@ except ModuleNotFoundError:
 
 
 class SynapseSliceDataset(Dataset):
-    def __init__(self, data_dir: Path, split: str, image_size: int, num_classes: int):
+    def __init__(
+        self,
+        data_dir: Path,
+        split: str,
+        image_size: int,
+        num_classes: int,
+        label_map: str | None = None,
+    ):
         self.image_dir = data_dir / split / "images"
         self.label_dir = data_dir / split / "labels"
         self.image_size = image_size
         self.num_classes = num_classes
+        self.label_map = label_map
         self.samples = sorted(self.image_dir.glob("*.npy"))
         if not self.samples:
             raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
@@ -48,6 +73,7 @@ class SynapseSliceDataset(Dataset):
         min_label = 0
         for image_path in self.samples:
             label = np.load(self.label_dir / image_path.name)
+            label = apply_label_map(label, self.label_map)
             max_label = max(max_label, int(label.max()))
             min_label = min(min_label, int(label.min()))
         if min_label < 0:
@@ -68,6 +94,7 @@ class SynapseSliceDataset(Dataset):
         label_path = self.label_dir / image_path.name
         image = np.load(image_path).astype("float32")
         label = np.load(label_path).astype("int64")
+        label = apply_label_map(label, self.label_map)
 
         image = torch.from_numpy(image).unsqueeze(0)
         label = torch.from_numpy(label)
@@ -87,11 +114,26 @@ class SynapseSliceDataset(Dataset):
 
 
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes: int, ignore_background: bool = True, eps: float = 1e-6):
+    def __init__(
+        self,
+        num_classes: int,
+        ignore_background: bool = True,
+        eps: float = 1e-6,
+        class_weights: torch.Tensor | None = None,
+    ):
         super().__init__()
         self.num_classes = num_classes
         self.ignore_background = ignore_background
         self.eps = eps
+        if class_weights is not None:
+            if class_weights.numel() != num_classes - (1 if ignore_background else 0):
+                raise ValueError(
+                    f"class_weights 长度应为 {num_classes - (1 if ignore_background else 0)}，"
+                    f"当前为 {class_weights.numel()}"
+                )
+            self.register_buffer("class_weights", class_weights.float())
+        else:
+            self.class_weights = None
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         probs = F.softmax(logits, dim=1)
@@ -102,7 +144,11 @@ class DiceLoss(nn.Module):
         dice = (2.0 * intersection + self.eps) / (cardinality + self.eps)
         if self.ignore_background:
             dice = dice[1:]
-        return 1.0 - dice.mean()
+        loss = 1.0 - dice
+        if self.class_weights is None:
+            return loss.mean()
+        weights = self.class_weights.to(loss.device)
+        return (loss * weights).sum() / weights.sum()
 
 
 @torch.no_grad()
@@ -110,11 +156,13 @@ def compute_mean_dice(
     logits: torch.Tensor,
     targets: torch.Tensor,
     num_classes: int,
+    class_ids: tuple[int, ...] | list[int] | None = None,
     ignore_background: bool = True,
     eps: float = 1e-6,
 ) -> float:
     preds = torch.argmax(logits, dim=1)
-    class_ids = range(1, num_classes) if ignore_background else range(num_classes)
+    if class_ids is None:
+        class_ids = tuple(range(1, num_classes) if ignore_background else range(num_classes))
     dice_scores = []
     for class_id in class_ids:
         pred_mask = preds == class_id
@@ -127,6 +175,21 @@ def compute_mean_dice(
     if not dice_scores:
         return 0.0
     return float(sum(dice_scores) / len(dice_scores))
+
+
+def build_dice_class_weights(
+    num_classes: int,
+    weight_values: list[float] | None,
+) -> torch.Tensor | None:
+    if not weight_values:
+        return None
+    expected = num_classes - 1
+    if len(weight_values) != expected:
+        raise ValueError(
+            f"dice_class_weights 需要 {expected} 个值（class 1..{num_classes - 1}），"
+            f"当前为 {len(weight_values)}"
+        )
+    return torch.tensor(weight_values, dtype=torch.float32)
 
 
 def load_config(config_path: Path) -> dict:
@@ -142,19 +205,43 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).with_name("config.toml"),
     )
     parser.add_argument("--device", default=None)
+    parser.add_argument("--epochs", type=int, default=None, help="覆盖 config 中的 num_epochs")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="快速试跑：hidden_channels=32, batch_size=1",
+    )
     return parser.parse_args()
+
+
+def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
+    optimizer_name = hyper_cfg.get("optimizer", "adam").lower()
+    lr = float(hyper_cfg["learning_rate"])
+    weight_decay = float(hyper_cfg["weight_decay"])
+    if optimizer_name == "sgd":
+        return torch.optim.SGD(
+            model.parameters(),
+            lr=lr,
+            momentum=float(hyper_cfg["momentum"]),
+            weight_decay=weight_decay,
+        )
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
-    criterion: nn.Module,
+    criterion: DiceLoss,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-) -> tuple[float, float]:
+    val_metric_class_ids: tuple[int, ...],
+) -> tuple[float, float, float]:
     model.train()
     total_loss = 0.0
     total_dice = 0.0
+    total_eval_dice = 0.0
     for images, labels in loader:
         images = images.to(device)
         labels = labels.to(device)
@@ -165,28 +252,102 @@ def train_one_epoch(
         optimizer.step()
         total_loss += loss.item()
         total_dice += compute_mean_dice(logits, labels, criterion.num_classes)
+        total_eval_dice += compute_mean_dice(
+            logits, labels, criterion.num_classes, class_ids=val_metric_class_ids
+        )
     count = len(loader)
-    return total_loss / count, total_dice / count
+    return total_loss / count, total_dice / count, total_eval_dice / count
 
 
 @torch.no_grad()
 def validate(
     model: nn.Module,
     loader: DataLoader,
-    criterion: nn.Module,
+    criterion: DiceLoss,
     device: torch.device,
-) -> tuple[float, float]:
+    val_metric_class_ids: tuple[int, ...],
+) -> tuple[float, float, float]:
     model.eval()
     total_loss = 0.0
     total_dice = 0.0
+    total_eval_dice = 0.0
     for images, labels in loader:
         images = images.to(device)
         labels = labels.to(device)
         logits = model(images)
         total_loss += criterion(logits, labels).item()
         total_dice += compute_mean_dice(logits, labels, criterion.num_classes)
+        total_eval_dice += compute_mean_dice(
+            logits, labels, criterion.num_classes, class_ids=val_metric_class_ids
+        )
     count = len(loader)
-    return total_loss / count, total_dice / count
+    return total_loss / count, total_dice / count, total_eval_dice / count
+
+
+@torch.no_grad()
+def compute_per_class_dice(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    class_ids: tuple[int, ...] | list[int],
+    eps: float = 1e-6,
+) -> dict[int, float | None]:
+    model.eval()
+    intersection = {class_id: 0.0 for class_id in class_ids}
+    union = {class_id: 0.0 for class_id in class_ids}
+    for images, labels in loader:
+        images = images.to(device)
+        labels = labels.to(device)
+        preds = torch.argmax(model(images), dim=1)
+        for class_id in class_ids:
+            pred_mask = preds == class_id
+            target_mask = labels == class_id
+            intersection[class_id] += (pred_mask & target_mask).sum().item()
+            union[class_id] += pred_mask.sum().item() + target_mask.sum().item()
+    results: dict[int, float | None] = {}
+    for class_id in class_ids:
+        if union[class_id] == 0:
+            results[class_id] = None
+        else:
+            results[class_id] = float((2.0 * intersection[class_id] + eps) / (union[class_id] + eps))
+    return results
+
+
+def should_log_class_metrics(epoch: int, num_epochs: int, every: int) -> bool:
+    if every <= 0:
+        return False
+    return epoch == 1 or epoch == num_epochs or epoch % every == 0
+
+
+def log_class_metrics(
+    epoch: int,
+    split: str,
+    class_dice: dict[int, float | None],
+    class_metrics_logger: ClassMetricsLogger,
+    logger,
+    label_map: str | None = None,
+) -> None:
+    rows = []
+    parts = []
+    for class_id in sorted(class_dice):
+        dice = class_dice[class_id]
+        if label_map == "eval8":
+            class_name = eval_model_class_name(class_id)
+        else:
+            class_name = LABEL_NAMES.get(class_id, f"class_{class_id}")
+        rows.append(
+            {
+                "epoch": epoch,
+                "split": split,
+                "class_id": class_id,
+                "class_name": class_name,
+                "dice": round(dice, 4) if dice is not None else "",
+            }
+        )
+        dice_text = f"{dice:.4f}" if dice is not None else "N/A"
+        parts.append(f"{class_name}={dice_text}")
+    class_metrics_logger.log_rows(rows)
+    logger.info(f"Epoch [{epoch:03d}] class dice [{split}]: " + ", ".join(parts))
 
 
 def main():
@@ -197,9 +358,24 @@ def main():
     model_cfg = cfg["model"]
     train_cfg = cfg.get("train", {})
 
+    exp_cfg = cfg.get("experiments", {})
+    experiment_name = exp_cfg.get("name")
+    if not experiment_name:
+        raise ValueError("config 缺少 [experiments].name，每次训练请指定唯一名称")
+
+    num_epochs = int(args.epochs or hyper_cfg["num_epochs"])
+    hyper_cfg["num_epochs"] = num_epochs
+    if args.quick:
+        model_cfg["hidden_channels"] = 32
+        dataset_cfg["batch_size"] = 1
+
     data_dir = ROOT / train_cfg.get("data_dir", "data/synapse_processed")
-    output_dir = ROOT / train_cfg.get("output_dir", str(EXP_DIR.relative_to(ROOT) / "outputs"))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    run = create_experiment_run(
+        resolve_runs_root(EXP_DIR, cfg),
+        experiment_name,
+        cfg,
+        args.config,
+    )
 
     device = torch.device(args.device or train_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
     image_size = int(dataset_cfg["image_size"])
@@ -207,10 +383,34 @@ def main():
     num_workers = int(dataset_cfg["num_workers"])
     num_classes = int(model_cfg["class_nums"])
     hidden_channels = int(model_cfg["hidden_channels"])
-    num_epochs = int(hyper_cfg["num_epochs"])
+    label_map = model_cfg.get("label_map")
+    class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
+    class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
+    if label_map == "eval8":
+        default_metric_class_ids = EVAL_MODEL_CLASS_IDS
+        default_val_metric_class_ids = EVAL_MODEL_CLASS_IDS
+    else:
+        default_metric_class_ids = ALL_METRIC_CLASS_IDS
+        default_val_metric_class_ids = EVAL_CLASS_IDS
+    metric_class_ids = tuple(
+        int(v) for v in train_cfg.get("metric_class_ids", default_metric_class_ids)
+    )
+    val_metric_class_ids = tuple(
+        int(v) for v in train_cfg.get("val_metric_class_ids", default_val_metric_class_ids)
+    )
+    dice_class_weights = build_dice_class_weights(
+        num_classes,
+        train_cfg.get("dice_class_weights"),
+    )
+    early_stopping_patience = int(train_cfg.get("early_stopping_patience", 0))
+    early_stopping_min_delta = float(train_cfg.get("early_stopping_min_delta", 0.0))
 
-    train_set = SynapseSliceDataset(data_dir, "train", image_size, num_classes)
-    val_set = SynapseSliceDataset(data_dir, "val", image_size, num_classes)
+    train_set = SynapseSliceDataset(
+        data_dir, "train", image_size, num_classes, label_map=label_map
+    )
+    val_set = SynapseSliceDataset(
+        data_dir, "val", image_size, num_classes, label_map=label_map
+    )
     train_loader = DataLoader(
         train_set,
         batch_size=batch_size,
@@ -231,69 +431,125 @@ def main():
         out_channels=num_classes,
         hidden_channels=hidden_channels,
     ).to(device)
-    criterion = DiceLoss(num_classes=num_classes, ignore_background=True)
-    optimizer_name = hyper_cfg.get("optimizer", "sgd").lower()
-    if optimizer_name == "sgd":
-        optimizer = torch.optim.SGD(
-            model.parameters(),
-            lr=float(hyper_cfg["learning_rate"]),
-            momentum=float(hyper_cfg["momentum"]),
-            weight_decay=float(hyper_cfg["weight_decay"]),
-        )
-    else:
-        optimizer = torch.optim.Adam(
-            model.parameters(),
-            lr=float(hyper_cfg["learning_rate"]),
-            weight_decay=float(hyper_cfg["weight_decay"]),
-        )
+    criterion = DiceLoss(
+        num_classes=num_classes,
+        ignore_background=True,
+        class_weights=dice_class_weights,
+    )
+    optimizer = build_optimizer(hyper_cfg, model)
 
-    logger = setup_file_logger(output_dir)
-    ckpt_mgr = CheckpointManager(output_dir / "checkpoints")
+    logger = setup_file_logger(run.run_dir)
+    ckpt_mgr = CheckpointManager(run.checkpoints_dir)
+    split_loaders = {"train": train_loader, "val": val_loader}
 
-    with CsvMetricsLogger(output_dir / "train_log.csv") as metrics_logger:
-        last_epoch = metrics_logger.last_epoch()
-        if last_epoch is not None:
-            logger.info(f"检测到已有训练记录，上次 epoch={last_epoch}，将继续追加写入")
+    logger.info(f"Experiment: {run.name}")
+    logger.info(f"Run dir: {run.run_dir}")
 
+    with CsvMetricsLogger(run.history_path) as metrics_logger, ClassMetricsLogger(
+        run.run_dir / "class_metrics.csv"
+    ) as class_metrics_logger:
         logger.info(f"Device: {device}")
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
-        logger.info(f"Output dir: {output_dir}")
-        if ckpt_mgr.best_metric > 0:
-            logger.info(f"已加载历史 best val dice: {ckpt_mgr.best_metric:.4f}")
+        logger.info(
+            f"Model: image_size={image_size}, hidden_channels={hidden_channels}, "
+            f"class_nums={num_classes}, label_map={label_map or 'none'}"
+        )
+        if class_metrics_every > 0:
+            logger.info(
+                f"Class metrics every {class_metrics_every} epochs on splits: {class_metrics_splits}"
+            )
+        logger.info(f"Val metric classes (best/early-stop): {list(val_metric_class_ids)}")
+        if dice_class_weights is not None:
+            logger.info(f"Dice class weights (1..{num_classes - 1}): {dice_class_weights.tolist()}")
+        if early_stopping_patience > 0:
+            logger.info(
+                f"Early stopping: patience={early_stopping_patience}, "
+                f"min_delta={early_stopping_min_delta}"
+            )
 
+        epochs_without_improve = 0
+        completed_epochs = 0
         for epoch in range(1, num_epochs + 1):
             start = time.time()
-            train_loss, train_dice = train_one_epoch(model, train_loader, criterion, optimizer, device)
-            val_loss, val_dice = validate(model, val_loader, criterion, device)
+            train_loss, train_dice, train_eval_dice = train_one_epoch(
+                model, train_loader, criterion, optimizer, device, val_metric_class_ids
+            )
+            val_loss, val_dice, val_eval_dice = validate(
+                model, val_loader, criterion, device, val_metric_class_ids
+            )
             elapsed = time.time() - start
+            completed_epochs = epoch
             metrics_logger.log(
                 {
                     "epoch": epoch,
                     "train_loss": train_loss,
                     "train_dice": train_dice,
+                    "train_eval_dice": train_eval_dice,
                     "val_loss": val_loss,
                     "val_dice": val_dice,
+                    "val_eval_dice": val_eval_dice,
                     "seconds": round(elapsed, 2),
                 }
             )
             logger.info(
                 f"Epoch [{epoch:03d}/{num_epochs}] "
                 f"train_loss={train_loss:.4f} train_dice={train_dice:.4f} "
+                f"train_eval_dice={train_eval_dice:.4f} "
                 f"val_loss={val_loss:.4f} val_dice={val_dice:.4f} "
+                f"val_eval_dice={val_eval_dice:.4f} "
                 f"time={elapsed:.1f}s"
             )
 
             state = {
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "val_dice": val_dice,
+                "val_dice": val_eval_dice,
+                "val_dice_all": val_dice,
                 "config": cfg,
             }
             ckpt_mgr.save_last(epoch, state)
-            ckpt_mgr.maybe_save_best(val_dice, epoch, state)
+            if val_eval_dice > ckpt_mgr.best_metric + early_stopping_min_delta:
+                ckpt_mgr.maybe_save_best(val_eval_dice, epoch, state)
+                epochs_without_improve = 0
+            else:
+                epochs_without_improve += 1
 
+            if should_log_class_metrics(epoch, num_epochs, class_metrics_every):
+                for split in class_metrics_splits:
+                    loader = split_loaders.get(split)
+                    if loader is None:
+                        continue
+                    class_dice = compute_per_class_dice(
+                        model, loader, device, metric_class_ids
+                    )
+                    log_class_metrics(
+                        epoch, split, class_dice, class_metrics_logger, logger, label_map
+                    )
+
+            if (
+                early_stopping_patience > 0
+                and epochs_without_improve >= early_stopping_patience
+            ):
+                logger.info(
+                    f"Early stopping at epoch {epoch}: "
+                    f"val_eval_dice 连续 {epochs_without_improve} epoch 未提升"
+                )
+                break
+
+    stop_status = "completed"
+    if early_stopping_patience > 0 and completed_epochs < num_epochs:
+        stop_status = "early_stopped"
+
+    update_training_summary(
+        run.summary_path,
+        status=stop_status,
+        best_val_dice=ckpt_mgr.best_metric,
+        best_epoch=ckpt_mgr.best_epoch,
+        completed_epochs=completed_epochs,
+    )
     logger.info(f"Best val dice: {ckpt_mgr.best_metric:.4f}")
     logger.info(f"Best checkpoint: {ckpt_mgr.best_path}")
+    logger.info(f"Last checkpoint: {ckpt_mgr.last_path}")
 
 
 if __name__ == "__main__":
