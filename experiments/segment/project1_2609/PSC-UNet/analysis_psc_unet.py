@@ -1,4 +1,4 @@
-"""PSC-UNet 推理与评估：计算 Dice、HD95，并保存预测结果。
+"""PSC-UNet 推理与评估：Dice / IoU / Precision / Recall / HD95 等指标与可视化。
 
 用法（在项目根目录执行）：
     python experiments/segment/project1_2609/PSC-UNet/analysis_psc_unet.py
@@ -13,6 +13,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -24,7 +25,9 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
+from src.utils.data.synapse.labels import ORGAN_COLORS, EVAL_CLASS_IDS
 from src.utils.logger import resolve_experiment_run, update_evaluation_summary
+from src.utils.segmentation_metrics import aggregate_metric_lists, compute_binary_metrics
 
 try:
     import tomllib
@@ -32,16 +35,10 @@ except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore
 
 
-ORGAN_METRICS = {
-    1: "spleen",
-    2: "right_kidney",
-    3: "left_kidney",
-    4: "gallbladder",
-    6: "liver",
-    7: "stomach",
-    8: "aorta",
-    11: "pancreas",
-}
+ORGAN_METRICS = {cid: name for cid, name in zip(
+    EVAL_CLASS_IDS,
+    ["spleen", "right_kidney", "left_kidney", "gallbladder", "liver", "stomach", "aorta", "pancreas"],
+)}
 
 ORGAN_NAMES_CN = {
     "spleen": "脾脏",
@@ -53,6 +50,13 @@ ORGAN_NAMES_CN = {
     "aorta": "主动脉",
     "pancreas": "胰腺",
 }
+
+METRIC_KEYS = (
+    "dice", "iou", "precision", "recall",
+    "fp_ratio", "fn_ratio",
+    "gt_area", "pred_area", "pred_gt_ratio", "gt_percent", "pred_percent",
+    "hd95",
+)
 
 
 def load_psc_unet_class():
@@ -162,17 +166,6 @@ def surface_mask(mask: np.ndarray) -> np.ndarray:
     return mask.astype(bool) & ~eroded
 
 
-def compute_dice(pred: np.ndarray, target: np.ndarray, eps: float = 1e-6) -> float:
-    pred = pred.astype(bool)
-    target = target.astype(bool)
-    if pred.sum() == 0 and target.sum() == 0:
-        return 1.0
-    if pred.sum() == 0 or target.sum() == 0:
-        return 0.0
-    intersection = np.logical_and(pred, target).sum()
-    return float((2.0 * intersection + eps) / (pred.sum() + target.sum() + eps))
-
-
 def compute_hd95(pred: np.ndarray, target: np.ndarray) -> float:
     pred = pred.astype(bool)
     target = target.astype(bool)
@@ -191,23 +184,69 @@ def compute_hd95(pred: np.ndarray, target: np.ndarray) -> float:
     return float(max(np.percentile(distances_pred_to_gt, 95), np.percentile(distances_gt_to_pred, 95)))
 
 
-def save_overlay(image: np.ndarray, label: np.ndarray, pred: np.ndarray, output_path: Path) -> None:
-    import matplotlib.pyplot as plt
+def _fmt_metric(value: float | None, percent: bool = False) -> str:
+    if value is None:
+        return "N/A"
+    if percent:
+        return f"{value * 100:.1f}%"
+    return f"{value:.3f}"
 
-    colors = {
-        1: "#E74C3C",
-        2: "#2ECC71",
-        3: "#3498DB",
-        4: "#F1C40F",
-        6: "#E67E22",
-        7: "#1ABC9C",
-        8: "#EC407A",
-        11: "#9B59B6",
-    }
+
+def _organ_slice_metrics(
+    pred: np.ndarray,
+    label: np.ndarray,
+    total_pixels: int,
+) -> dict[int, dict[str, Any]]:
+    results: dict[int, dict[str, Any]] = {}
+    for class_id in ORGAN_METRICS:
+        pred_mask = pred == class_id
+        target_mask = label == class_id
+        if target_mask.sum() == 0 and pred_mask.sum() == 0:
+            continue
+        metrics = compute_binary_metrics(pred_mask, target_mask, total_pixels)
+        hd95 = compute_hd95(pred_mask, target_mask)
+        metrics["hd95"] = hd95 if np.isfinite(hd95) else None
+        results[class_id] = metrics
+    return results
+
+
+def _metrics_to_row(prefix: str, organ_name: str, metrics: dict[str, Any]) -> dict[str, Any]:
+    row: dict[str, Any] = {"organ": organ_name}
+    for key in METRIC_KEYS:
+        value = metrics.get(key)
+        row[f"{prefix}_{key}"] = value if value is not None else ""
+    return row
+
+
+def _pred_only_stats(pred: np.ndarray, total_pixels: int) -> dict[int, dict[str, Any]]:
+    stats: dict[int, dict[str, Any]] = {}
+    for class_id in ORGAN_METRICS:
+        area = int((pred == class_id).sum())
+        if area == 0:
+            continue
+        stats[class_id] = {
+            "pred_area": area,
+            "pred_percent": float(area / total_pixels * 100.0),
+        }
+    return stats
+
+
+def save_overlay(
+    image: np.ndarray,
+    label: np.ndarray | None,
+    pred: np.ndarray,
+    organ_metrics: dict[int, dict[str, Any]] | None,
+    output_path: Path,
+    has_label: bool = True,
+) -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+
+    vis_colors = {cid: ORGAN_COLORS.get(cid, "#95A5A6") for cid in ORGAN_METRICS}
 
     def overlay(base: np.ndarray, mask: np.ndarray, alpha: float = 0.45) -> np.ndarray:
         rgb = np.stack([base, base, base], axis=-1)
-        for class_id, color in colors.items():
+        for class_id, color in vis_colors.items():
             region = mask == class_id
             if not np.any(region):
                 continue
@@ -215,16 +254,94 @@ def save_overlay(image: np.ndarray, label: np.ndarray, pred: np.ndarray, output_
             rgb[region] = (1 - alpha) * rgb[region] + alpha * color_rgb
         return np.clip(rgb, 0, 1)
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(image, cmap="gray", vmin=0, vmax=1)
-    axes[0].set_title("Image")
-    axes[0].axis("off")
-    axes[1].imshow(overlay(image, label))
-    axes[1].set_title("Ground Truth")
-    axes[1].axis("off")
-    axes[2].imshow(overlay(image, pred))
-    axes[2].set_title("Prediction")
-    axes[2].axis("off")
+    if has_label:
+        fig = plt.figure(figsize=(18, 6))
+        gs = GridSpec(1, 4, width_ratios=[1, 1, 1, 1.15], wspace=0.08)
+        ax_img = fig.add_subplot(gs[0])
+        ax_gt = fig.add_subplot(gs[1])
+        ax_pred = fig.add_subplot(gs[2])
+        ax_metrics = fig.add_subplot(gs[3])
+    else:
+        fig = plt.figure(figsize=(15, 5))
+        gs = GridSpec(1, 3, width_ratios=[1, 1, 1.1], wspace=0.08)
+        ax_img = fig.add_subplot(gs[0])
+        ax_gt = None
+        ax_pred = fig.add_subplot(gs[1])
+        ax_metrics = fig.add_subplot(gs[2])
+
+    ax_img.imshow(image, cmap="gray", vmin=0, vmax=1)
+    ax_img.set_title("Image")
+    ax_img.axis("off")
+    if ax_gt is not None and label is not None:
+        ax_gt.imshow(overlay(image, label))
+        ax_gt.set_title("Ground Truth")
+        ax_gt.axis("off")
+    ax_pred.imshow(overlay(image, pred))
+    ax_pred.set_title("Prediction")
+    ax_pred.axis("off")
+
+    lines = ["Per-organ metrics", "=" * 34]
+    if not has_label:
+        lines = ["Prediction volume (no GT)", "=" * 34]
+        pred_stats = _pred_only_stats(pred, pred.size)
+        for class_id, stats in pred_stats.items():
+            organ_name = ORGAN_METRICS[class_id]
+            lines.append(
+                f"[{organ_name}]  {stats['pred_area']}px  ({stats['pred_percent']:.2f}%)"
+            )
+        if not pred_stats:
+            lines.append("No evaluated organ predicted.")
+    elif organ_metrics:
+        overall = {key: [] for key in ("dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio")}
+        for class_id, metrics in organ_metrics.items():
+            organ_name = ORGAN_METRICS[class_id]
+            lines.append(f"[{organ_name}]")
+            lines.append(
+                f"  D {_fmt_metric(metrics['dice'])}  "
+                f"IoU {_fmt_metric(metrics['iou'])}  "
+                f"P {_fmt_metric(metrics['precision'])}  "
+                f"R {_fmt_metric(metrics['recall'])}"
+            )
+            lines.append(
+                f"  GT {metrics['gt_area']}px ({metrics['gt_percent']:.2f}%)  "
+                f"Pred {metrics['pred_area']}px ({metrics['pred_percent']:.2f}%)  "
+                f"P/GT {_fmt_metric(metrics['pred_gt_ratio'])}"
+            )
+            fp_text = _fmt_metric(metrics["fp_ratio"], percent=True)
+            fn_text = _fmt_metric(metrics["fn_ratio"], percent=True)
+            lines.append(f"  FP% {fp_text}  FN% {fn_text}")
+            for key in overall:
+                if metrics.get(key) is not None:
+                    overall[key].append(metrics[key])
+            lines.append("")
+
+        lines.append("OVERALL (slice mean)")
+        lines.append(
+            "  D {d}  IoU {i}  P {p}  R {r}".format(
+                d=_fmt_metric(float(np.mean(overall["dice"])) if overall["dice"] else None),
+                i=_fmt_metric(float(np.mean(overall["iou"])) if overall["iou"] else None),
+                p=_fmt_metric(float(np.mean(overall["precision"])) if overall["precision"] else None),
+                r=_fmt_metric(float(np.mean(overall["recall"])) if overall["recall"] else None),
+            )
+        )
+        lines.append(
+            "  FP% {fp}  FN% {fn}".format(
+                fp=_fmt_metric(float(np.mean(overall["fp_ratio"])) if overall["fp_ratio"] else None, percent=True),
+                fn=_fmt_metric(float(np.mean(overall["fn_ratio"])) if overall["fn_ratio"] else None, percent=True),
+            )
+        )
+    else:
+        lines.append("No organ present in GT or prediction.")
+
+    ax_metrics.axis("off")
+    ax_metrics.text(
+        0.02, 0.98, "\n".join(lines),
+        transform=ax_metrics.transAxes,
+        va="top", ha="left",
+        fontsize=8.5, family="monospace",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.92, edgecolor="#CCCCCC"),
+    )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -245,8 +362,9 @@ def run_split(
     split_dir = output_dir / split
     pred_dir = split_dir / "predictions"
     vis_dir = split_dir / "visualizations"
-    slice_rows = []
-    class_metrics: dict[int, dict[str, list[float]]] = {}
+    slice_rows: list[dict[str, Any]] = []
+    organ_rows: list[dict[str, Any]] = []
+    class_metrics: dict[int, dict[str, list[float | None]]] = {}
     visualized = 0
 
     for images, labels, names in loader:
@@ -260,35 +378,58 @@ def run_split(
             image = images_np[index, 0]
             label = labels[index].numpy()
             has_label = int(label.min()) >= 0
+            total_pixels = int(pred.size)
 
-            row = {
+            row: dict[str, Any] = {
                 "slice_name": name,
                 "split": split,
                 "has_label": has_label,
+                "total_pixels": total_pixels,
             }
 
             if save_predictions:
                 pred_dir.mkdir(parents=True, exist_ok=True)
                 np.save(pred_dir / name, pred.astype(np.int16))
 
+            organ_slice_metrics: dict[int, dict[str, Any]] = {}
             if has_label:
-                for class_id in ORGAN_METRICS:
-                    pred_mask = pred == class_id
-                    target_mask = label == class_id
-                    if target_mask.sum() == 0:
-                        continue
-                    class_metrics.setdefault(class_id, {"dice": [], "hd95": []})
-                    dice = compute_dice(pred_mask, target_mask)
-                    hd95 = compute_hd95(pred_mask, target_mask)
-                    class_metrics[class_id]["dice"].append(dice)
-                    if np.isfinite(hd95):
-                        class_metrics[class_id]["hd95"].append(hd95)
-                    row[f"dice_{ORGAN_METRICS[class_id]}"] = dice
-                    row[f"hd95_{ORGAN_METRICS[class_id]}"] = hd95 if np.isfinite(hd95) else ""
+                organ_slice_metrics = _organ_slice_metrics(pred, label, total_pixels)
+                slice_overall = {key: [] for key in ("dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio")}
+                for class_id, metrics in organ_slice_metrics.items():
+                    organ_name = ORGAN_METRICS[class_id]
+                    class_metrics.setdefault(class_id, {key: [] for key in METRIC_KEYS})
+                    for key in METRIC_KEYS:
+                        value = metrics.get(key)
+                        class_metrics[class_id][key].append(value)
+                        row[f"{key}_{organ_name}"] = value if value is not None else ""
+                    for key in slice_overall:
+                        if metrics.get(key) is not None:
+                            slice_overall[key].append(metrics[key])
+                    organ_rows.append({
+                        "slice_name": name,
+                        "split": split,
+                        "organ": organ_name,
+                        "organ_cn": ORGAN_NAMES_CN[organ_name],
+                        **{key: metrics.get(key, "") for key in METRIC_KEYS},
+                    })
+
+                for key, values in slice_overall.items():
+                    row[f"mean_{key}"] = float(np.mean(values)) if values else ""
 
                 if save_visualizations and visualized < visualize_num:
-                    save_overlay(image, label, pred, vis_dir / f"{Path(name).stem}.png")
+                    save_overlay(
+                        image, label, pred, organ_slice_metrics,
+                        vis_dir / f"{Path(name).stem}.png",
+                        has_label=True,
+                    )
                     visualized += 1
+            elif save_visualizations and visualized < visualize_num:
+                save_overlay(
+                    image, None, pred, None,
+                    vis_dir / f"{Path(name).stem}.png",
+                    has_label=False,
+                )
+                visualized += 1
 
             slice_rows.append(row)
 
@@ -299,12 +440,57 @@ def run_split(
 
     split_dir.mkdir(parents=True, exist_ok=True)
 
-    with (split_dir / "slice_metrics.csv").open("w", newline="", encoding="utf-8") as f:
-        if slice_rows:
+    if slice_rows:
+        with (split_dir / "slice_metrics.csv").open("w", newline="", encoding="utf-8") as f:
             fieldnames = sorted({key for row in slice_rows for key in row})
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(slice_rows)
+
+    if organ_rows:
+        with (split_dir / "organ_slice_metrics.csv").open("w", newline="", encoding="utf-8") as f:
+            fieldnames = sorted({key for row in organ_rows for key in row})
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(organ_rows)
+
+    with (split_dir / "organ_metrics.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "organ", "organ_cn", "num_slices",
+                "dice_mean", "dice_percent", "iou_mean", "iou_percent",
+                "precision_mean", "precision_percent", "recall_mean", "recall_percent",
+                "fp_ratio_mean", "fp_ratio_percent", "fn_ratio_mean", "fn_ratio_percent",
+                "hd95_mean", "gt_area_mean", "pred_area_mean",
+                "pred_gt_ratio_mean", "gt_percent_mean", "pred_percent_mean",
+            ],
+        )
+        writer.writeheader()
+        for organ_name, metrics in summary["per_organ"].items():
+            writer.writerow({
+                "organ": organ_name,
+                "organ_cn": metrics["name_cn"],
+                "num_slices": metrics["num_slices"],
+                "dice_mean": metrics["dice"],
+                "dice_percent": metrics["dice_percent"],
+                "iou_mean": metrics["iou"],
+                "iou_percent": metrics["iou_percent"],
+                "precision_mean": metrics["precision"],
+                "precision_percent": metrics["precision_percent"],
+                "recall_mean": metrics["recall"],
+                "recall_percent": metrics["recall_percent"],
+                "fp_ratio_mean": metrics["fp_ratio"],
+                "fp_ratio_percent": metrics["fp_ratio_percent"],
+                "fn_ratio_mean": metrics["fn_ratio"],
+                "fn_ratio_percent": metrics["fn_ratio_percent"],
+                "hd95_mean": metrics["hd95"],
+                "gt_area_mean": metrics["gt_area_mean"],
+                "pred_area_mean": metrics["pred_area_mean"],
+                "pred_gt_ratio_mean": metrics["pred_gt_ratio_mean"],
+                "gt_percent_mean": metrics["gt_percent_mean"],
+                "pred_percent_mean": metrics["pred_percent_mean"],
+            })
 
     with (split_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
@@ -312,31 +498,39 @@ def run_split(
     return summary
 
 
-def summarize_metrics(class_metrics: dict[int, dict[str, list[float]]], num_classes: int) -> dict:
-    per_organ = {}
-    dice_values = []
-    hd95_values = []
+def summarize_metrics(class_metrics: dict[int, dict[str, list[float | None]]], num_classes: int) -> dict:
+    per_organ: dict[str, dict[str, Any]] = {}
+    pooled: dict[str, list[float | None]] = {key: [] for key in METRIC_KEYS}
 
     for class_id, organ_name in ORGAN_METRICS.items():
-        values = class_metrics.get(class_id, {"dice": [], "hd95": []})
-        organ_dice = values.get("dice", [])
-        organ_hd95 = values.get("hd95", [])
-        per_organ[organ_name] = {
+        values = class_metrics.get(class_id, {})
+        organ_summary: dict[str, Any] = {
             "name_cn": ORGAN_NAMES_CN[organ_name],
-            "dice": float(np.mean(organ_dice)) if organ_dice else None,
-            "dice_percent": float(np.mean(organ_dice) * 100) if organ_dice else None,
-            "hd95": float(np.mean(organ_hd95)) if organ_hd95 else None,
-            "num_slices": len(organ_dice),
+            "num_slices": len(values.get("dice", [])),
         }
-        if organ_dice:
-            dice_values.extend(organ_dice)
-        if organ_hd95:
-            hd95_values.extend(organ_hd95)
+        for key in METRIC_KEYS:
+            agg = aggregate_metric_lists(values.get(key, []))
+            organ_summary[key] = agg["mean"]
+            if key in {"dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio"}:
+                organ_summary[f"{key}_percent"] = agg["mean_percent"]
+            if key in {"gt_area", "pred_area", "pred_gt_ratio", "gt_percent", "pred_percent"}:
+                organ_summary[f"{key}_mean"] = agg["mean"]
+            if agg["mean"] is not None and key in {"dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio", "hd95"}:
+                pooled[key].append(agg["mean"])
+        per_organ[organ_name] = organ_summary
+
+    overall: dict[str, Any] = {}
+    for key in METRIC_KEYS:
+        agg = aggregate_metric_lists(pooled.get(key, []))
+        overall[f"mean_{key}"] = agg["mean"]
+        if key in {"dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio"}:
+            overall[f"mean_{key}_percent"] = agg["mean_percent"]
 
     return {
-        "mean_dice": float(np.mean(dice_values)) if dice_values else None,
-        "mean_dice_percent": float(np.mean(dice_values) * 100) if dice_values else None,
-        "mean_hd95": float(np.mean(hd95_values)) if hd95_values else None,
+        **overall,
+        "mean_dice": overall.get("mean_dice"),
+        "mean_dice_percent": overall.get("mean_dice_percent"),
+        "mean_hd95": overall.get("mean_hd95"),
         "per_organ": per_organ,
         "num_classes": num_classes,
     }
@@ -353,16 +547,78 @@ def print_summary(summary: dict) -> None:
     print(f"\n===== {split.upper()} =====")
     print(f"切片总数: {summary['num_slices']}")
     print(f"带标签切片: {summary['num_labeled_slices']}")
-    if summary["mean_dice"] is not None:
-        print(f"平均 Dice: {summary['mean_dice_percent']:.2f}%")
-        print(f"平均 HD95: {summary['mean_hd95']:.2f} mm")
+    if summary.get("mean_dice") is not None:
+        print(
+            f"平均 Dice: {summary['mean_dice_percent']:.2f}%  "
+            f"IoU: {summary.get('mean_iou_percent', 0):.2f}%  "
+            f"Prec: {summary.get('mean_precision_percent', 0):.2f}%  "
+            f"Rec: {summary.get('mean_recall_percent', 0):.2f}%"
+        )
+        if summary.get("mean_hd95") is not None:
+            print(f"平均 HD95: {summary['mean_hd95']:.2f} mm")
+        print(
+            f"平均 FP%: {summary.get('mean_fp_ratio_percent', 0):.2f}%  "
+            f"FN%: {summary.get('mean_fn_ratio_percent', 0):.2f}%"
+        )
     print("各器官指标:")
     for organ_name, metrics in summary["per_organ"].items():
-        dice = metrics["dice_percent"]
-        hd95 = metrics["hd95"]
-        dice_text = f"{dice:.2f}%" if dice is not None else "N/A"
-        hd95_text = f"{hd95:.2f}" if hd95 is not None else "N/A"
-        print(f"  {metrics['name_cn']:>6} ({organ_name:<12}) Dice={dice_text:>8}  HD95={hd95_text:>8}  slices={metrics['num_slices']}")
+        if metrics["num_slices"] == 0:
+            continue
+        print(
+            f"  {metrics['name_cn']:>6} ({organ_name:<12}) "
+            f"Dice={metrics.get('dice_percent', 0) or 0:>6.2f}%  "
+            f"IoU={metrics.get('iou_percent', 0) or 0:>6.2f}%  "
+            f"P={metrics.get('precision_percent', 0) or 0:>6.2f}%  "
+            f"R={metrics.get('recall_percent', 0) or 0:>6.2f}%  "
+            f"GT%={metrics.get('gt_percent_mean', 0) or 0:>5.2f}  "
+            f"Pred%={metrics.get('pred_percent_mean', 0) or 0:>5.2f}  "
+            f"P/GT={metrics.get('pred_gt_ratio_mean', 0) or 0:>5.2f}  "
+            f"slices={metrics['num_slices']}"
+        )
+
+
+def merge_evaluation_splits(summary_path: Path, new_splits: list[dict]) -> dict:
+    summary: dict[str, Any] = {}
+    if summary_path.exists():
+        with summary_path.open(encoding="utf-8") as f:
+            summary = json.load(f)
+    existing = {item["split"]: item for item in summary.get("evaluation", {}).get("splits", [])}
+    for item in new_splits:
+        existing[item["split"]] = item
+    evaluation = summary.get("evaluation", {})
+    evaluation["splits"] = [existing[key] for key in sorted(existing)]
+    return evaluation
+
+
+def rebuild_paper_metrics(run_dir: Path) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for split in ("train", "val", "test"):
+        summary_path = run_dir / "predictions" / split / "summary.json"
+        if not summary_path.exists():
+            continue
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if summary.get("mean_dice") is None:
+            continue
+        row: dict[str, str] = {
+            "split": split,
+            "Dice (%)": f"{summary['mean_dice_percent']:.2f}",
+            "IoU (%)": f"{summary.get('mean_iou_percent', 0):.2f}",
+            "Precision (%)": f"{summary.get('mean_precision_percent', 0):.2f}",
+            "Recall (%)": f"{summary.get('mean_recall_percent', 0):.2f}",
+            "HD95": f"{summary.get('mean_hd95', 0):.2f}",
+            "FP ratio (%)": f"{summary.get('mean_fp_ratio_percent', 0):.2f}",
+            "FN ratio (%)": f"{summary.get('mean_fn_ratio_percent', 0):.2f}",
+        }
+        for organ_name, metrics in summary.get("per_organ", {}).items():
+            cn = ORGAN_NAMES_CN[organ_name]
+            row[f"{cn} Dice (%)"] = (
+                f"{metrics['dice_percent']:.2f}" if metrics.get("dice_percent") is not None else ""
+            )
+            row[f"{cn} IoU (%)"] = (
+                f"{metrics['iou_percent']:.2f}" if metrics.get("iou_percent") is not None else ""
+            )
+        rows.append(row)
+    return rows
 
 
 def main():
@@ -434,27 +690,11 @@ def main():
         all_summaries.append(summary)
         print_summary(summary)
 
-    evaluation = {
-        "checkpoint": str(checkpoint_path),
-        "splits": all_summaries,
-    }
+    evaluation = merge_evaluation_splits(run.summary_path, all_summaries)
+    evaluation["checkpoint"] = str(checkpoint_path)
     update_evaluation_summary(run.summary_path, evaluation)
 
-    readme_rows = []
-    for summary in all_summaries:
-        if summary["mean_dice"] is None:
-            continue
-        row = {
-            "split": summary["split"],
-            "Dice (%)": f"{summary['mean_dice_percent']:.2f}",
-            "HD95": f"{summary['mean_hd95']:.2f}",
-        }
-        for organ_name, metrics in summary["per_organ"].items():
-            row[ORGAN_NAMES_CN[organ_name] + " (%)"] = (
-                f"{metrics['dice_percent']:.2f}" if metrics["dice_percent"] is not None else ""
-            )
-        readme_rows.append(row)
-
+    readme_rows = rebuild_paper_metrics(run.run_dir)
     if readme_rows:
         paper_metrics_path = run.run_dir / "paper_metrics.csv"
         fieldnames: list[str] = []

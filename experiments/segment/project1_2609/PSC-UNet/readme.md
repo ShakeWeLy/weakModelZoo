@@ -16,8 +16,9 @@ python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py --config exp
 # 快速试跑 1 个 epoch
 python experiments/segment/project1_2609/PSC-UNet/train_psc_unet.py --epochs 1 --quick
 
-# 推理与评估
+# 推理与评估（Dice / IoU / Precision / Recall / FP% / FN% / HD95）
 python experiments/segment/project1_2609/PSC-UNet/analysis_psc_unet.py
+python experiments/segment/project1_2609/PSC-UNet/analysis_psc_unet.py --split test
 ```
 
 ## 输出
@@ -34,8 +35,15 @@ PSC-UNet/runs/2026-09-23_001_PSC-UNet/
 │   ├── best.pth
 │   └── last.pth
 └── predictions/
+    ├── train/
     ├── val/
     └── test/
+        ├── predictions/
+        ├── visualizations/   # 含逐器官指标叠加
+        ├── slice_metrics.csv
+        ├── organ_slice_metrics.csv
+        ├── organ_metrics.csv
+        └── summary.json
 ```
 
 ## 说明
