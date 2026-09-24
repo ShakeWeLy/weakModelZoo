@@ -25,7 +25,14 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.data.synapse.labels import ORGAN_COLORS, EVAL_CLASS_IDS
+from src.utils.data.synapse.labels import (
+    ALL_METRIC_CLASS_IDS,
+    LABEL_NAMES,
+    LABEL_NAMES_CN,
+    class_color,
+    make_overlay,
+    metric_class_name,
+)
 from src.utils.logger import resolve_experiment_run, update_evaluation_summary
 from src.utils.segmentation_metrics import aggregate_metric_lists, compute_binary_metrics
 
@@ -35,21 +42,8 @@ except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore
 
 
-ORGAN_METRICS = {cid: name for cid, name in zip(
-    EVAL_CLASS_IDS,
-    ["spleen", "right_kidney", "left_kidney", "gallbladder", "liver", "stomach", "aorta", "pancreas"],
-)}
-
-ORGAN_NAMES_CN = {
-    "spleen": "脾脏",
-    "right_kidney": "右肾脏",
-    "left_kidney": "左肾脏",
-    "gallbladder": "胆囊",
-    "liver": "肝脏",
-    "stomach": "胃",
-    "aorta": "主动脉",
-    "pancreas": "胰腺",
-}
+ORGAN_METRICS = {class_id: metric_class_name(class_id) for class_id in ALL_METRIC_CLASS_IDS}
+ORGAN_NAMES_CN = {metric_class_name(class_id): LABEL_NAMES_CN[class_id] for class_id in ALL_METRIC_CLASS_IDS}
 
 METRIC_KEYS = (
     "dice", "iou", "precision", "recall",
@@ -231,6 +225,15 @@ def _pred_only_stats(pred: np.ndarray, total_pixels: int) -> dict[int, dict[str,
     return stats
 
 
+def _present_class_ids(*masks: np.ndarray | None) -> list[int]:
+    present: set[int] = set()
+    for mask in masks:
+        if mask is None:
+            continue
+        present.update(int(class_id) for class_id in np.unique(mask) if int(class_id) != 0)
+    return sorted(present)
+
+
 def save_overlay(
     image: np.ndarray,
     label: np.ndarray | None,
@@ -239,46 +242,55 @@ def save_overlay(
     output_path: Path,
     has_label: bool = True,
 ) -> None:
+    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
 
-    vis_colors = {cid: ORGAN_COLORS.get(cid, "#95A5A6") for cid in ORGAN_METRICS}
-
-    def overlay(base: np.ndarray, mask: np.ndarray, alpha: float = 0.45) -> np.ndarray:
-        rgb = np.stack([base, base, base], axis=-1)
-        for class_id, color in vis_colors.items():
-            region = mask == class_id
-            if not np.any(region):
-                continue
-            color_rgb = np.array(plt.matplotlib.colors.to_rgb(color))
-            rgb[region] = (1 - alpha) * rgb[region] + alpha * color_rgb
-        return np.clip(rgb, 0, 1)
-
     if has_label:
-        fig = plt.figure(figsize=(18, 6))
-        gs = GridSpec(1, 4, width_ratios=[1, 1, 1, 1.15], wspace=0.08)
-        ax_img = fig.add_subplot(gs[0])
-        ax_gt = fig.add_subplot(gs[1])
-        ax_pred = fig.add_subplot(gs[2])
-        ax_metrics = fig.add_subplot(gs[3])
+        fig = plt.figure(figsize=(18, 7.2))
+        gs = GridSpec(2, 4, height_ratios=[1, 0.12], width_ratios=[1, 1, 1, 1.15], wspace=0.08, hspace=0.12)
+        ax_img = fig.add_subplot(gs[0, 0])
+        ax_gt = fig.add_subplot(gs[0, 1])
+        ax_pred = fig.add_subplot(gs[0, 2])
+        ax_metrics = fig.add_subplot(gs[0, 3])
+        ax_legend = fig.add_subplot(gs[1, :])
     else:
-        fig = plt.figure(figsize=(15, 5))
-        gs = GridSpec(1, 3, width_ratios=[1, 1, 1.1], wspace=0.08)
-        ax_img = fig.add_subplot(gs[0])
+        fig = plt.figure(figsize=(15, 6.2))
+        gs = GridSpec(2, 3, height_ratios=[1, 0.12], width_ratios=[1, 1, 1.1], wspace=0.08, hspace=0.12)
+        ax_img = fig.add_subplot(gs[0, 0])
         ax_gt = None
-        ax_pred = fig.add_subplot(gs[1])
-        ax_metrics = fig.add_subplot(gs[2])
+        ax_pred = fig.add_subplot(gs[0, 1])
+        ax_metrics = fig.add_subplot(gs[0, 2])
+        ax_legend = fig.add_subplot(gs[1, :])
 
     ax_img.imshow(image, cmap="gray", vmin=0, vmax=1)
     ax_img.set_title("Image")
     ax_img.axis("off")
     if ax_gt is not None and label is not None:
-        ax_gt.imshow(overlay(image, label))
+        ax_gt.imshow(make_overlay(image, label))
         ax_gt.set_title("Ground Truth")
         ax_gt.axis("off")
-    ax_pred.imshow(overlay(image, pred))
+    ax_pred.imshow(make_overlay(image, pred))
     ax_pred.set_title("Prediction")
     ax_pred.axis("off")
+
+    present_ids = _present_class_ids(label, pred)
+    ax_legend.axis("off")
+    if present_ids:
+        legend_handles = [
+            mpatches.Patch(
+                color=class_color(class_id),
+                label=f"{class_id}:{metric_class_name(class_id)}",
+            )
+            for class_id in present_ids
+        ]
+        ax_legend.legend(
+            handles=legend_handles,
+            loc="center",
+            ncol=min(7, len(legend_handles)),
+            fontsize=7.5,
+            frameon=False,
+        )
 
     lines = ["Per-organ metrics", "=" * 34]
     if not has_label:

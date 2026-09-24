@@ -28,6 +28,7 @@ data_dir = "data/synapse_processed"
 device = "cuda"
 class_metrics_every = 10
 class_metrics_splits = ["val", "train"]
+# 默认记录全部 13 个前景类；若只关心论文 8 器官可改为 [1,2,3,4,6,7,8,11]
 
 [test]
 data_dir = "data/synapse_processed"

@@ -59,8 +59,23 @@ FALLBACK_COLORS = ["#95A5A6", "#34495E", "#F39C12", "#C0392B", "#27AE60"]
 
 FOREGROUND_CLASS_IDS = tuple(class_id for class_id in LABEL_NAMES if class_id != 0)
 
-# 与论文评估/analysis 脚本保持一致的主要器官类别
+# 与论文评估保持一致的主要器官类别
 EVAL_CLASS_IDS = (1, 2, 3, 4, 6, 7, 8, 11)
+
+# 全量前景类别（训练监控 / 分析指标 / 可视化）
+ALL_METRIC_CLASS_IDS = FOREGROUND_CLASS_IDS
+
+
+def metric_class_name(class_id: int) -> str:
+    return LABEL_NAMES.get(class_id, f"class_{class_id}")
+
+
+def metric_class_name_cn(class_id: int) -> str:
+    return LABEL_NAMES_CN.get(class_id, metric_class_name(class_id))
+
+
+def build_metric_class_map() -> dict[int, str]:
+    return {class_id: metric_class_name(class_id) for class_id in ALL_METRIC_CLASS_IDS}
 
 
 def class_color(class_id: int) -> str:

@@ -23,7 +23,7 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.data.synapse.labels import EVAL_CLASS_IDS, LABEL_NAMES
+from src.utils.data.synapse.labels import ALL_METRIC_CLASS_IDS, EVAL_CLASS_IDS, LABEL_NAMES
 from src.utils.logger import (
     CheckpointManager,
     ClassMetricsLogger,
@@ -358,7 +358,9 @@ def main():
     swin_depths = tuple(int(v) for v in model_cfg.get("swin_depths", [2, 2, 2, 2]))
     class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
     class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
-    metric_class_ids = tuple(int(v) for v in train_cfg.get("metric_class_ids", EVAL_CLASS_IDS))
+    metric_class_ids = tuple(
+        int(v) for v in train_cfg.get("metric_class_ids", ALL_METRIC_CLASS_IDS)
+    )
 
     if repeat_gray_to_rgb:
         in_channels = 3
