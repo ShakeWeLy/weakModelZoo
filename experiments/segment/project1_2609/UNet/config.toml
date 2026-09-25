@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-25_001_UNet_V3"
+name = "2026-09-25_001_UNet_V4"
 date = "2026-09-25"
-description = "change all class weight to 1"
+description = "Add skip_absent_classes option to DiceLoss for improved handling of absent classes during loss calculation. This enhancement allows for more flexible training by returning zero loss when no present classes are found, ensuring better performance in scenarios with missing labels."
 runs_dir = "runs"
 
 [dataset]

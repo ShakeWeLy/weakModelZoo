@@ -120,11 +120,13 @@ class DiceLoss(nn.Module):
         ignore_background: bool = True,
         eps: float = 1e-6,
         class_weights: torch.Tensor | None = None,
+        skip_absent_classes: bool = True,
     ):
         super().__init__()
         self.num_classes = num_classes
         self.ignore_background = ignore_background
         self.eps = eps
+        self.skip_absent_classes = skip_absent_classes
         if class_weights is not None:
             if class_weights.numel() != num_classes - (1 if ignore_background else 0):
                 raise ValueError(
@@ -142,9 +144,22 @@ class DiceLoss(nn.Module):
         intersection = torch.sum(probs * targets_one_hot, dims)
         cardinality = torch.sum(probs + targets_one_hot, dims)
         dice = (2.0 * intersection + self.eps) / (cardinality + self.eps)
+        gt_per_class = targets_one_hot.sum(dim=dims)
         if self.ignore_background:
             dice = dice[1:]
+            gt_per_class = gt_per_class[1:]
         loss = 1.0 - dice
+
+        if self.skip_absent_classes:
+            present = gt_per_class > 0
+            if not present.any():
+                return logits.sum() * 0.0
+            loss = loss[present]
+            if self.class_weights is None:
+                return loss.mean()
+            weights = self.class_weights.to(loss.device)[present]
+            return (loss * weights).sum() / weights.sum()
+
         if self.class_weights is None:
             return loss.mean()
         weights = self.class_weights.to(loss.device)
