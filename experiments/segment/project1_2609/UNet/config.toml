@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-24_001_UNet_V1"
-date = "2026-09-24"
-description = "8-organ only: 9-class head + eval8 label remap + weighted dice"
+name = "2026-09-25_001_UNet_V3"
+date = "2026-09-25"
+description = "change all class weight to 1"
 runs_dir = "runs"
 
 [dataset]
@@ -30,7 +30,7 @@ class_metrics_splits = ["val", "train"]
 # 模型空间 class 1..8，对应 spleen/rk/lk/gb/liver/stomach/aorta/pancreas
 val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
 metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
-dice_class_weights = [1, 1, 1, 2.5, 1, 1, 1.5, 5]
+dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
 early_stopping_patience = 50
 early_stopping_min_delta = 0.0
 
