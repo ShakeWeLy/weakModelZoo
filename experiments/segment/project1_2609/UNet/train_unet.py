@@ -31,6 +31,11 @@ from src.utils.data.synapse.labels import (
     apply_label_map,
     eval_model_class_name,
 )
+from src.utils.data.synapse.class_guaranteed_sampler import (
+    ClassGuaranteedEpochSampler,
+    build_sample_pools,
+    format_class_groups,
+)
 from src.utils.logger import (
     CheckpointManager,
     ClassMetricsLogger,
@@ -328,6 +333,45 @@ def compute_per_class_dice(
     return results
 
 
+DEFAULT_GUARANTEED_CLASS_GROUPS = [[4], [11], [12, 13]]
+
+
+def build_train_dataloader(
+    train_set: SynapseSliceDataset,
+    batch_size: int,
+    num_workers: int,
+    pin_memory: bool,
+    train_cfg: dict,
+) -> tuple[DataLoader, ClassGuaranteedEpochSampler | None]:
+    train_sampler: ClassGuaranteedEpochSampler | None = None
+    if train_cfg.get("guaranteed_sampling", False):
+        class_groups = train_cfg.get(
+            "guaranteed_class_groups", DEFAULT_GUARANTEED_CLASS_GROUPS
+        )
+        class_groups = [[int(v) for v in group] for group in class_groups]
+        min_samples_per_group = int(
+            train_cfg.get("min_samples_per_group_per_epoch", batch_size)
+        )
+        pools = build_sample_pools(train_set.samples, train_set.label_dir, class_groups)
+        train_sampler = ClassGuaranteedEpochSampler(
+            dataset_size=len(train_set),
+            pools=pools,
+            min_samples_per_group=min_samples_per_group,
+            seed=int(train_cfg.get("sampler_seed", 42)),
+            group_names=format_class_groups(class_groups),
+        )
+
+    train_loader = DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    return train_loader, train_sampler
+
+
 def should_log_class_metrics(epoch: int, num_epochs: int, every: int) -> bool:
     if every <= 0:
         return False
@@ -426,12 +470,12 @@ def main():
     val_set = SynapseSliceDataset(
         data_dir, "val", image_size, num_classes, label_map=label_map
     )
-    train_loader = DataLoader(
+    train_loader, train_sampler = build_train_dataloader(
         train_set,
         batch_size=batch_size,
-        shuffle=True,
         num_workers=num_workers,
         pin_memory=device.type == "cuda",
+        train_cfg=train_cfg,
     )
     val_loader = DataLoader(
         val_set,
@@ -481,10 +525,31 @@ def main():
                 f"Early stopping: patience={early_stopping_patience}, "
                 f"min_delta={early_stopping_min_delta}"
             )
+        if train_sampler is not None:
+            logger.info(
+                "Guaranteed sampling enabled: "
+                + ", ".join(
+                    f"{name}={size}"
+                    for name, size in zip(
+                        train_sampler.group_names, train_sampler.pool_sizes
+                    )
+                )
+            )
+            logger.info(
+                f"Min samples per group per epoch: "
+                f"{train_sampler.min_samples_per_group}"
+            )
+            if label_map == "eval8":
+                logger.info(
+                    "注意: eval8 下肾上腺(12/13)会被映射为背景，"
+                    "但仍会保证含肾上腺的切片进入训练。"
+                )
 
         epochs_without_improve = 0
         completed_epochs = 0
         for epoch in range(1, num_epochs + 1):
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
             start = time.time()
             train_loss, train_dice, train_eval_dice = train_one_epoch(
                 model, train_loader, criterion, optimizer, device, val_metric_class_ids

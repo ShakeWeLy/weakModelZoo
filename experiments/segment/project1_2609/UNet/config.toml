@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-25_001_UNet_V4"
+name = "2026-09-25_001_UNet_V5"
 date = "2026-09-25"
-description = "Add skip_absent_classes option to DiceLoss for improved handling of absent classes during loss calculation. This enhancement allows for more flexible training by returning zero loss when no present classes are found, ensuring better performance in scenarios with missing labels."
+description = "Add guaranteed_sampling and min_samples_per_group_per_epoch options to ensure that each epoch contains at least one slice of each guaranteed class group."
 runs_dir = "runs"
 
 [dataset]
@@ -33,6 +33,12 @@ metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
 dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
 early_stopping_patience = 50
 early_stopping_min_delta = 0.0
+# 保证每个 epoch 都包含胆囊/胰腺/肾上腺切片（按原始标签 ID 检测）
+guaranteed_sampling = true
+guaranteed_class_groups = [[4], [11]]
+# 每个类别组每 epoch 至少采样的切片数，默认等于 batch_size
+min_samples_per_group_per_epoch = 8
+sampler_seed = 42
 
 [test]
 data_dir = "data/synapse_processed"
