@@ -1,4 +1,4 @@
-"""在 Synapse 2D 切片上训练 U-Net，使用 Dice Loss。
+"""在 Synapse 2D 切片上训练 U-Net，使用 Dice Loss + Cross Entropy。
 
 用法（在项目根目录执行）：
     python experiments/segment/project1_2609/UNet/train_unet.py
@@ -171,6 +171,39 @@ class DiceLoss(nn.Module):
         return (loss * weights).sum() / weights.sum()
 
 
+class DiceCELoss(nn.Module):
+    """Dice Loss + Cross Entropy 组合损失。"""
+
+    def __init__(
+        self,
+        num_classes: int,
+        ignore_background: bool = True,
+        eps: float = 1e-6,
+        class_weights: torch.Tensor | None = None,
+        ce_class_weights: torch.Tensor | None = None,
+        skip_absent_classes: bool = True,
+        dice_weight: float = 1.0,
+        ce_weight: float = 1.0,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+        self.dice_loss = DiceLoss(
+            num_classes=num_classes,
+            ignore_background=ignore_background,
+            eps=eps,
+            class_weights=class_weights,
+            skip_absent_classes=skip_absent_classes,
+        )
+        self.ce_loss = nn.CrossEntropyLoss(weight=ce_class_weights)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        dice = self.dice_loss(logits, targets)
+        ce = self.ce_loss(logits, targets)
+        return self.dice_weight * dice + self.ce_weight * ce
+
+
 @torch.no_grad()
 def compute_mean_dice(
     logits: torch.Tensor,
@@ -210,6 +243,24 @@ def build_dice_class_weights(
             f"当前为 {len(weight_values)}"
         )
     return torch.tensor(weight_values, dtype=torch.float32)
+
+
+def build_ce_class_weights(
+    num_classes: int,
+    dice_weights: torch.Tensor | None,
+    weight_values: list[float] | None,
+) -> torch.Tensor | None:
+    if weight_values:
+        if len(weight_values) != num_classes:
+            raise ValueError(
+                f"ce_class_weights 需要 {num_classes} 个值（class 0..{num_classes - 1}），"
+                f"当前为 {len(weight_values)}"
+            )
+        return torch.tensor(weight_values, dtype=torch.float32)
+    if dice_weights is not None:
+        background = torch.tensor([1.0], dtype=torch.float32)
+        return torch.cat([background, dice_weights])
+    return None
 
 
 def load_config(config_path: Path) -> dict:
@@ -253,7 +304,7 @@ def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
-    criterion: DiceLoss,
+    criterion: DiceCELoss,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     val_metric_class_ids: tuple[int, ...],
@@ -283,7 +334,7 @@ def train_one_epoch(
 def validate(
     model: nn.Module,
     loader: DataLoader,
-    criterion: DiceLoss,
+    criterion: DiceCELoss,
     device: torch.device,
     val_metric_class_ids: tuple[int, ...],
 ) -> tuple[float, float, float]:
@@ -461,6 +512,13 @@ def main():
         num_classes,
         train_cfg.get("dice_class_weights"),
     )
+    ce_class_weights = build_ce_class_weights(
+        num_classes,
+        dice_class_weights,
+        train_cfg.get("ce_class_weights"),
+    )
+    dice_loss_weight = float(train_cfg.get("dice_loss_weight", 1.0))
+    ce_loss_weight = float(train_cfg.get("ce_loss_weight", 1.0))
     early_stopping_patience = int(train_cfg.get("early_stopping_patience", 0))
     early_stopping_min_delta = float(train_cfg.get("early_stopping_min_delta", 0.0))
 
@@ -490,11 +548,15 @@ def main():
         out_channels=num_classes,
         hidden_channels=hidden_channels,
     ).to(device)
-    criterion = DiceLoss(
+    criterion = DiceCELoss(
         num_classes=num_classes,
         ignore_background=True,
         class_weights=dice_class_weights,
-    )
+        ce_class_weights=ce_class_weights,
+        skip_absent_classes=bool(train_cfg.get("skip_absent_classes", True)),
+        dice_weight=dice_loss_weight,
+        ce_weight=ce_loss_weight,
+    ).to(device)
     optimizer = build_optimizer(hyper_cfg, model)
 
     logger = setup_file_logger(run.run_dir)
@@ -518,8 +580,13 @@ def main():
                 f"Class metrics every {class_metrics_every} epochs on splits: {class_metrics_splits}"
             )
         logger.info(f"Val metric classes (best/early-stop): {list(val_metric_class_ids)}")
+        logger.info(
+            f"Loss: DiceCE (dice_weight={dice_loss_weight}, ce_weight={ce_loss_weight})"
+        )
         if dice_class_weights is not None:
             logger.info(f"Dice class weights (1..{num_classes - 1}): {dice_class_weights.tolist()}")
+        if ce_class_weights is not None:
+            logger.info(f"CE class weights (0..{num_classes - 1}): {ce_class_weights.tolist()}")
         if early_stopping_patience > 0:
             logger.info(
                 f"Early stopping: patience={early_stopping_patience}, "

@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-25_001_UNet_V5"
+name = "2026-09-25_001_UNet_V7"
 date = "2026-09-25"
-description = "Add guaranteed_sampling and min_samples_per_group_per_epoch options to ensure that each epoch contains at least one slice of each guaranteed class group."
+description = "Dice + CE baseline: standard shuffle, all foreground classes in Dice loss (no skip_absent_classes, no guaranteed_sampling)."
 runs_dir = "runs"
 
 [dataset]
@@ -31,14 +31,14 @@ class_metrics_splits = ["val", "train"]
 val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
 metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
 dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
+# 组合损失: loss = dice_loss_weight * Dice + ce_loss_weight * CE
+dice_loss_weight = 1.0
+ce_loss_weight = 1.0
+# CE 类别权重；未设置时自动使用 [1.0] + dice_class_weights
+# ce_class_weights = [1, 1, 1, 1, 1, 1, 1, 1, 1]
+skip_absent_classes = false
 early_stopping_patience = 50
 early_stopping_min_delta = 0.0
-# 保证每个 epoch 都包含胆囊/胰腺/肾上腺切片（按原始标签 ID 检测）
-guaranteed_sampling = true
-guaranteed_class_groups = [[4], [11]]
-# 每个类别组每 epoch 至少采样的切片数，默认等于 batch_size
-min_samples_per_group_per_epoch = 8
-sampler_seed = 42
 
 [test]
 data_dir = "data/synapse_processed"
