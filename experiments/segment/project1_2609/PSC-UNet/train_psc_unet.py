@@ -23,6 +23,7 @@ EXP_DIR = Path(__file__).resolve().parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
+from src.utils.data.synapse.augment import AugmentConfig, apply_augmentation, build_augment_config
 from src.utils.data.synapse.labels import (
     ALL_METRIC_CLASS_IDS,
     EVAL_CLASS_IDS,
@@ -69,6 +70,7 @@ class SynapseSliceDataset(Dataset):
         num_classes: int,
         repeat_gray_to_rgb: bool = False,
         label_map: str | None = None,
+        augment_config: AugmentConfig | None = None,
     ):
         self.image_dir = data_dir / split / "images"
         self.label_dir = data_dir / split / "labels"
@@ -76,6 +78,7 @@ class SynapseSliceDataset(Dataset):
         self.num_classes = num_classes
         self.repeat_gray_to_rgb = repeat_gray_to_rgb
         self.label_map = label_map
+        self.augment_config = augment_config
         self.samples = sorted(self.image_dir.glob("*.npy"))
         if not self.samples:
             raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
@@ -125,6 +128,9 @@ class SynapseSliceDataset(Dataset):
             size=(self.image_size, self.image_size),
             mode="nearest",
         ).squeeze(0).squeeze(0).long()
+
+        if self.augment_config is not None:
+            image, label = apply_augmentation(image, label, self.augment_config)
 
         if self.repeat_gray_to_rgb:
             image = image.repeat(3, 1, 1)
@@ -516,6 +522,8 @@ def main():
         in_channels = 3
 
     validate_image_size(image_size)
+    augment_config = build_augment_config(dataset_cfg)
+    model_dropout = float(model_cfg.get("dropout", 0.0))
 
     train_set = SynapseSliceDataset(
         data_dir,
@@ -524,6 +532,7 @@ def main():
         num_classes,
         repeat_gray_to_rgb=repeat_gray_to_rgb,
         label_map=label_map,
+        augment_config=augment_config,
     )
     val_set = SynapseSliceDataset(
         data_dir,
@@ -553,6 +562,7 @@ def main():
         out_channels=num_classes,
         base_dim=base_dim,
         swin_depths=swin_depths,
+        dropout=model_dropout,
     ).to(device)
     criterion = DiceCELoss(
         num_classes=num_classes,
@@ -579,9 +589,24 @@ def main():
         logger.info(f"Train slices: {len(train_set)}, Val slices: {len(val_set)}")
         logger.info(
             f"Model: image_size={image_size}, in_channels={in_channels}, base_dim={base_dim}, "
-            f"swin_depths={swin_depths}, repeat_gray_to_rgb={repeat_gray_to_rgb}, "
+            f"swin_depths={swin_depths}, dropout={model_dropout}, "
+            f"repeat_gray_to_rgb={repeat_gray_to_rgb}, "
             f"class_nums={num_classes}, label_map={label_map or 'none'}"
         )
+        if augment_config.enabled:
+            logger.info(
+                "Augmentation: flip_h=%s flip_v=%s rotate=%s intensity_jitter=%s "
+                "scale=%s shift=%s noise_std=%s"
+                % (
+                    augment_config.flip_horizontal,
+                    augment_config.flip_vertical,
+                    augment_config.rotate,
+                    augment_config.intensity_jitter,
+                    augment_config.intensity_scale,
+                    augment_config.intensity_shift,
+                    augment_config.gaussian_noise_std,
+                )
+            )
         if class_metrics_every > 0:
             logger.info(
                 f"Class metrics every {class_metrics_every} epochs on splits: {class_metrics_splits}"

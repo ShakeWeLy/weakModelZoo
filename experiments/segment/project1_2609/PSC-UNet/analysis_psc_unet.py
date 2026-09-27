@@ -156,6 +156,7 @@ def load_model(checkpoint_path: Path, model_cfg: dict, device: torch.device):
         out_channels=int(model_cfg["class_nums"]),
         base_dim=int(model_cfg["base_dim"]),
         swin_depths=tuple(int(v) for v in model_cfg.get("swin_depths", [1, 1, 1, 1])),
+        dropout=float(model_cfg.get("dropout", 0.0)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()

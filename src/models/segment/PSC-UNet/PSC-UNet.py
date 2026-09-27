@@ -238,6 +238,7 @@ class PSC_UNet(nn.Module):
         out_channels: int = 1,
         base_dim: int = 64,
         swin_depths: Sequence[int] = (2, 2, 2, 2),
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         dims = [base_dim, base_dim * 2, base_dim * 4, base_dim * 8]
@@ -254,6 +255,7 @@ class PSC_UNet(nn.Module):
         self.up3 = FusionUp(dims[1], dims[1], dims[0])
         self.up4 = FusionUp(dims[0], dims[0], dims[0])
         self.up5 = UpNoSkip(dims[0], dims[0])
+        self.dropout = nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
         self.outc = OutConv(dims[0], out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -271,6 +273,7 @@ class PSC_UNet(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         x = self.up5(x)
+        x = self.dropout(x)
         return self.outc(x)
 
 
