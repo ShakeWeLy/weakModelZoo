@@ -26,6 +26,7 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.utils.data.synapse.labels import (
+    EVAL_MODEL_CLASS_NUM,
     EVAL_MODEL_TO_ORIGINAL,
     apply_label_map,
     build_organ_metrics,
@@ -34,6 +35,8 @@ from src.utils.data.synapse.labels import (
     metric_class_name,
     metric_class_name_cn,
     remap_label_from_eval_model,
+    remap_to_eval_model_array,
+    resolve_eval_label_map,
 )
 from src.utils.logger import resolve_experiment_run, update_evaluation_summary
 from src.utils.segmentation_metrics import aggregate_metric_lists, compute_binary_metrics
@@ -73,6 +76,13 @@ def build_organ_names_cn_from_metrics(organ_metrics: dict[int, str]) -> dict[str
     return names_cn
 
 
+def normalize_slice_filenames(slice_names: list[str]) -> list[str]:
+    return [
+        name if name.endswith(".npy") else f"{name}.npy"
+        for name in slice_names
+    ]
+
+
 class InferenceDataset(Dataset):
     def __init__(
         self,
@@ -81,13 +91,24 @@ class InferenceDataset(Dataset):
         image_size: int,
         repeat_gray_to_rgb: bool = False,
         label_map: str | None = None,
+        target_slices: list[str] | None = None,
     ):
         self.image_dir = data_dir / split / "images"
         self.label_dir = data_dir / split / "labels"
         self.image_size = image_size
         self.repeat_gray_to_rgb = repeat_gray_to_rgb
         self.label_map = label_map
-        self.samples = sorted(self.image_dir.glob("*.npy"))
+        all_samples = sorted(self.image_dir.glob("*.npy"))
+        if target_slices:
+            wanted = set(normalize_slice_filenames(target_slices))
+            self.samples = [path for path in all_samples if path.name in wanted]
+            missing = sorted(wanted - {path.name for path in self.samples})
+            if missing:
+                raise FileNotFoundError(
+                    f"{self.image_dir} 中未找到指定切片: {', '.join(missing)}"
+                )
+        else:
+            self.samples = all_samples
         if not self.samples:
             raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
 
@@ -249,12 +270,29 @@ def _present_class_ids(*masks: np.ndarray | None) -> list[int]:
     return sorted(present)
 
 
+def remap_for_eval_numpy(
+    pred: np.ndarray,
+    label: np.ndarray | None,
+    label_map: str | None,
+    eval_label_map: str | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    if eval_label_map == "eval8" and label_map != "eval8":
+        pred = remap_to_eval_model_array(pred)
+        if label is not None:
+            label = remap_to_eval_model_array(label)
+    return pred, label
+
+
 def _visualization_masks(
     label: np.ndarray | None,
     pred: np.ndarray,
     label_map: str | None,
+    eval_label_map: str | None = None,
 ) -> tuple[np.ndarray | None, np.ndarray]:
-    if label_map == "eval8":
+    effective_eval = eval_label_map or label_map
+    if effective_eval == "eval8":
+        if label_map != "eval8":
+            pred, label = remap_for_eval_numpy(pred, label, label_map, eval_label_map)
         pred_viz = remap_label_from_eval_model(pred)
         label_viz = remap_label_from_eval_model(label) if label is not None else None
         return label_viz, pred_viz
@@ -269,6 +307,7 @@ def save_overlay(
     output_path: Path,
     organ_metrics: dict[int, str],
     label_map: str | None = None,
+    eval_label_map: str | None = None,
     has_label: bool = True,
 ) -> None:
     import matplotlib.patches as mpatches
@@ -295,7 +334,7 @@ def save_overlay(
     ax_img.imshow(image, cmap="gray", vmin=0, vmax=1)
     ax_img.set_title("Image")
     ax_img.axis("off")
-    label_viz, pred_viz = _visualization_masks(label, pred, label_map)
+    label_viz, pred_viz = _visualization_masks(label, pred, label_map, eval_label_map)
     if ax_gt is not None and label_viz is not None:
         ax_gt.imshow(make_overlay(image, label_viz))
         ax_gt.set_title("Ground Truth")
@@ -400,6 +439,7 @@ def run_split(
     organ_metrics: dict[int, str],
     organ_names_cn: dict[str, str],
     label_map: str | None,
+    eval_label_map: str | None,
     save_predictions: bool,
     save_visualizations: bool,
     visualize_num: int,
@@ -423,6 +463,10 @@ def run_split(
             image = images_np[index, 0]
             label = labels[index].numpy()
             has_label = int(label.min()) >= 0
+            label_for_metrics = label if has_label else None
+            pred, label_for_metrics = remap_for_eval_numpy(
+                pred, label_for_metrics, label_map, eval_label_map
+            )
             total_pixels = int(pred.size)
 
             row: dict[str, Any] = {
@@ -438,7 +482,9 @@ def run_split(
 
             organ_slice_metrics: dict[int, dict[str, Any]] = {}
             if has_label:
-                organ_slice_metrics = _organ_slice_metrics(pred, label, total_pixels, organ_metrics)
+                organ_slice_metrics = _organ_slice_metrics(
+                    pred, label_for_metrics, total_pixels, organ_metrics
+                )
                 slice_overall = {key: [] for key in ("dice", "iou", "precision", "recall", "fp_ratio", "fn_ratio")}
                 for class_id, metrics in organ_slice_metrics.items():
                     organ_name = organ_metrics[class_id]
@@ -464,12 +510,13 @@ def run_split(
                 if save_visualizations and visualized < visualize_num:
                     save_overlay(
                         image,
-                        label,
+                        label_for_metrics,
                         pred,
                         organ_slice_metrics,
                         vis_dir / f"{Path(name).stem}.png",
                         organ_metrics,
                         label_map=label_map,
+                        eval_label_map=eval_label_map,
                         has_label=True,
                     )
                     visualized += 1
@@ -482,13 +529,19 @@ def run_split(
                     vis_dir / f"{Path(name).stem}.png",
                     organ_metrics,
                     label_map=label_map,
+                    eval_label_map=eval_label_map,
                     has_label=False,
                 )
                 visualized += 1
 
             slice_rows.append(row)
 
-    summary = summarize_metrics(class_metrics, num_classes, organ_metrics, organ_names_cn)
+    metric_num_classes = (
+        EVAL_MODEL_CLASS_NUM
+        if eval_label_map == "eval8" and label_map != "eval8"
+        else num_classes
+    )
+    summary = summarize_metrics(class_metrics, metric_num_classes, organ_metrics, organ_names_cn)
     summary["split"] = split
     summary["num_slices"] = len(slice_rows)
     summary["num_labeled_slices"] = sum(1 for row in slice_rows if row["has_label"])
@@ -701,7 +754,8 @@ def main():
     num_workers = int(dataset_cfg["num_workers"])
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
     label_map = model_cfg.get("label_map")
-    organ_metrics = build_organ_metrics(label_map)
+    eval_label_map = resolve_eval_label_map(label_map, train_cfg.get("eval_label_map"))
+    organ_metrics = build_organ_metrics(eval_label_map or label_map)
     organ_names_cn = build_organ_names_cn_from_metrics(organ_metrics)
     splits = [args.split] if args.split else test_cfg.get("splits", ["val", "test"])
     default_prediction_splits = ["val", "test"]
@@ -710,7 +764,10 @@ def main():
     visualization_splits = test_cfg.get("save_visualizations_splits")
     save_predictions_default = bool(test_cfg.get("save_predictions", True))
     save_visualizations_default = bool(test_cfg.get("save_visualizations", True))
+    target_slices = list(test_cfg.get("target_slices") or [])
     visualize_num = int(test_cfg.get("visualize_num", 5))
+    if target_slices:
+        visualize_num = len(target_slices)
 
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"未找到 checkpoint: {checkpoint_path}，请先运行 train_psc_unet.py")
@@ -723,7 +780,12 @@ def main():
     print("Model: PSC-UNet")
     print(f"Checkpoint: {checkpoint_path}")
     print(f"Predictions dir: {output_dir}")
-    print(f"Classes: {int(model_cfg['class_nums'])} | label_map: {label_map or 'none'}")
+    print(
+        f"Classes: {int(model_cfg['class_nums'])} | label_map: {label_map or 'none'} | "
+        f"eval_label_map: {eval_label_map or 'none'}"
+    )
+    if target_slices:
+        print(f"Target slices ({len(target_slices)}): {', '.join(target_slices)}")
 
     for split in splits:
         save_predictions = save_predictions_default and split_enabled(
@@ -732,13 +794,20 @@ def main():
         save_visualizations = save_visualizations_default and split_enabled(
             split, visualization_splits, default_visualization_splits
         )
-        dataset = InferenceDataset(
-            data_dir,
-            split,
-            image_size,
-            repeat_gray_to_rgb=repeat_gray_to_rgb,
-            label_map=label_map,
-        )
+        try:
+            dataset = InferenceDataset(
+                data_dir,
+                split,
+                image_size,
+                repeat_gray_to_rgb=repeat_gray_to_rgb,
+                label_map=label_map,
+                target_slices=target_slices or None,
+            )
+        except FileNotFoundError as exc:
+            if target_slices:
+                print(f"[skip] {split}: {exc}")
+                continue
+            raise
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -756,6 +825,7 @@ def main():
             organ_metrics=organ_metrics,
             organ_names_cn=organ_names_cn,
             label_map=label_map,
+            eval_label_map=eval_label_map,
             save_predictions=save_predictions,
             save_visualizations=save_visualizations,
             visualize_num=visualize_num,

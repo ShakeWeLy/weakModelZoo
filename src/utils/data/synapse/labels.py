@@ -136,6 +136,32 @@ def apply_label_map(label: np.ndarray, label_map: str | None) -> np.ndarray:
     return label
 
 
+def resolve_eval_label_map(
+    train_label_map: str | None,
+    eval_label_map: str | None = None,
+) -> str | None:
+    if eval_label_map:
+        return eval_label_map
+    return train_label_map
+
+
+def remap_to_eval_model_array(label: np.ndarray) -> np.ndarray:
+    """将原始 14 类标签/预测映射为 eval8 模型空间（0 + 8 器官）。"""
+    clipped = np.clip(label, 0, _ORIGINAL_TO_EVAL_MODEL_LUT.size - 1)
+    return _ORIGINAL_TO_EVAL_MODEL_LUT[clipped]
+
+
+def remap_to_eval_model_torch(label):
+    """torch 版原始 14 类 -> eval8 映射。"""
+    import torch
+
+    lut = torch.from_numpy(_ORIGINAL_TO_EVAL_MODEL_LUT).to(
+        device=label.device, dtype=label.dtype
+    )
+    clipped = label.clamp(0, lut.numel() - 1)
+    return lut[clipped]
+
+
 def class_color(class_id: int) -> str:
     if class_id in ORGAN_COLORS:
         return ORGAN_COLORS[class_id]

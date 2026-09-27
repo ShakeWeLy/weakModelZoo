@@ -28,9 +28,12 @@ from src.utils.data.synapse.labels import (
     ALL_METRIC_CLASS_IDS,
     EVAL_CLASS_IDS,
     EVAL_MODEL_CLASS_IDS,
+    EVAL_MODEL_CLASS_NUM,
     LABEL_NAMES,
     apply_label_map,
     eval_model_class_name,
+    remap_to_eval_model_torch,
+    resolve_eval_label_map,
 )
 from src.utils.logger import (
     CheckpointManager,
@@ -223,6 +226,17 @@ class DiceCELoss(nn.Module):
         return self.dice_weight * dice + self.ce_weight * ce
 
 
+def remap_for_eval(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+    train_label_map: str | None,
+    eval_label_map: str | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if eval_label_map == "eval8" and train_label_map != "eval8":
+        return remap_to_eval_model_torch(preds), remap_to_eval_model_torch(targets)
+    return preds, targets
+
+
 @torch.no_grad()
 def compute_mean_dice(
     logits: torch.Tensor,
@@ -231,8 +245,13 @@ def compute_mean_dice(
     class_ids: tuple[int, ...] | list[int] | None = None,
     ignore_background: bool = True,
     eps: float = 1e-6,
+    train_label_map: str | None = None,
+    eval_label_map: str | None = None,
 ) -> float:
     preds = torch.argmax(logits, dim=1)
+    preds, targets = remap_for_eval(preds, targets, train_label_map, eval_label_map)
+    if eval_label_map == "eval8" and train_label_map != "eval8":
+        num_classes = EVAL_MODEL_CLASS_NUM
     if class_ids is None:
         class_ids = tuple(range(1, num_classes) if ignore_background else range(num_classes))
     dice_scores = []
@@ -332,6 +351,19 @@ def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
     return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 
+def build_lr_scheduler(
+    hyper_cfg: dict, optimizer: torch.optim.Optimizer
+) -> torch.optim.lr_scheduler.LRScheduler | None:
+    scheduler_name = str(hyper_cfg.get("lr_scheduler", "")).lower()
+    if scheduler_name == "step":
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=int(hyper_cfg.get("lr_step_size", 50)),
+            gamma=float(hyper_cfg.get("lr_gamma", 0.5)),
+        )
+    return None
+
+
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -339,6 +371,8 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     val_metric_class_ids: tuple[int, ...],
+    train_label_map: str | None = None,
+    eval_label_map: str | None = None,
 ) -> tuple[float, float, float]:
     model.train()
     total_loss = 0.0
@@ -353,9 +387,16 @@ def train_one_epoch(
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-        total_dice += compute_mean_dice(logits, labels, criterion.num_classes)
+        total_dice += compute_mean_dice(
+            logits, labels, criterion.num_classes, train_label_map=train_label_map
+        )
         total_eval_dice += compute_mean_dice(
-            logits, labels, criterion.num_classes, class_ids=val_metric_class_ids
+            logits,
+            labels,
+            criterion.num_classes,
+            class_ids=val_metric_class_ids,
+            train_label_map=train_label_map,
+            eval_label_map=eval_label_map,
         )
     count = len(loader)
     return total_loss / count, total_dice / count, total_eval_dice / count
@@ -368,6 +409,8 @@ def validate(
     criterion: DiceCELoss,
     device: torch.device,
     val_metric_class_ids: tuple[int, ...],
+    train_label_map: str | None = None,
+    eval_label_map: str | None = None,
 ) -> tuple[float, float, float]:
     model.eval()
     total_loss = 0.0
@@ -378,9 +421,16 @@ def validate(
         labels = labels.to(device)
         logits = model(images)
         total_loss += criterion(logits, labels).item()
-        total_dice += compute_mean_dice(logits, labels, criterion.num_classes)
+        total_dice += compute_mean_dice(
+            logits, labels, criterion.num_classes, train_label_map=train_label_map
+        )
         total_eval_dice += compute_mean_dice(
-            logits, labels, criterion.num_classes, class_ids=val_metric_class_ids
+            logits,
+            labels,
+            criterion.num_classes,
+            class_ids=val_metric_class_ids,
+            train_label_map=train_label_map,
+            eval_label_map=eval_label_map,
         )
     count = len(loader)
     return total_loss / count, total_dice / count, total_eval_dice / count
@@ -393,6 +443,8 @@ def compute_per_class_dice(
     device: torch.device,
     class_ids: tuple[int, ...] | list[int],
     eps: float = 1e-6,
+    train_label_map: str | None = None,
+    eval_label_map: str | None = None,
 ) -> dict[int, float | None]:
     model.eval()
     intersection = {class_id: 0.0 for class_id in class_ids}
@@ -401,6 +453,7 @@ def compute_per_class_dice(
         images = images.to(device)
         labels = labels.to(device)
         preds = torch.argmax(model(images), dim=1)
+        preds, labels = remap_for_eval(preds, labels, train_label_map, eval_label_map)
         for class_id in class_ids:
             pred_mask = preds == class_id
             target_mask = labels == class_id
@@ -489,10 +542,14 @@ def main():
     in_channels = int(model_cfg.get("in_channels", 1))
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
     label_map = model_cfg.get("label_map")
+    eval_label_map = resolve_eval_label_map(label_map, train_cfg.get("eval_label_map"))
     swin_depths = tuple(int(v) for v in model_cfg.get("swin_depths", [2, 2, 2, 2]))
     class_metrics_every = int(train_cfg.get("class_metrics_every", 0))
     class_metrics_splits = list(train_cfg.get("class_metrics_splits", ["val"]))
-    if label_map == "eval8":
+    if eval_label_map == "eval8":
+        default_metric_class_ids = EVAL_MODEL_CLASS_IDS
+        default_val_metric_class_ids = EVAL_MODEL_CLASS_IDS
+    elif label_map == "eval8":
         default_metric_class_ids = EVAL_MODEL_CLASS_IDS
         default_val_metric_class_ids = EVAL_MODEL_CLASS_IDS
     else:
@@ -574,6 +631,7 @@ def main():
         ce_weight=ce_loss_weight,
     ).to(device)
     optimizer = build_optimizer(hyper_cfg, model)
+    scheduler = build_lr_scheduler(hyper_cfg, optimizer)
 
     logger = setup_file_logger(run.run_dir)
     ckpt_mgr = CheckpointManager(run.checkpoints_dir)
@@ -591,7 +649,8 @@ def main():
             f"Model: image_size={image_size}, in_channels={in_channels}, base_dim={base_dim}, "
             f"swin_depths={swin_depths}, dropout={model_dropout}, "
             f"repeat_gray_to_rgb={repeat_gray_to_rgb}, "
-            f"class_nums={num_classes}, label_map={label_map or 'none'}"
+            f"class_nums={num_classes}, label_map={label_map or 'none'}, "
+            f"eval_label_map={eval_label_map or 'none'}"
         )
         if augment_config.enabled:
             logger.info(
@@ -624,16 +683,34 @@ def main():
                 f"Early stopping: patience={early_stopping_patience}, "
                 f"min_delta={early_stopping_min_delta}"
             )
+        if scheduler is not None:
+            logger.info(
+                f"LR scheduler: StepLR(step_size={hyper_cfg.get('lr_step_size', 50)}, "
+                f"gamma={hyper_cfg.get('lr_gamma', 0.5)})"
+            )
 
         epochs_without_improve = 0
         completed_epochs = 0
         for epoch in range(1, num_epochs + 1):
             start = time.time()
             train_loss, train_dice, train_eval_dice = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, val_metric_class_ids
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+                device,
+                val_metric_class_ids,
+                train_label_map=label_map,
+                eval_label_map=eval_label_map,
             )
             val_loss, val_dice, val_eval_dice = validate(
-                model, val_loader, criterion, device, val_metric_class_ids
+                model,
+                val_loader,
+                criterion,
+                device,
+                val_metric_class_ids,
+                train_label_map=label_map,
+                eval_label_map=eval_label_map,
             )
             elapsed = time.time() - start
             completed_epochs = epoch
@@ -649,14 +726,17 @@ def main():
                     "seconds": round(elapsed, 2),
                 }
             )
+            current_lr = optimizer.param_groups[0]["lr"]
             logger.info(
                 f"Epoch [{epoch:03d}/{num_epochs}] "
                 f"train_loss={train_loss:.4f} train_dice={train_dice:.4f} "
                 f"train_eval_dice={train_eval_dice:.4f} "
                 f"val_loss={val_loss:.4f} val_dice={val_dice:.4f} "
                 f"val_eval_dice={val_eval_dice:.4f} "
-                f"time={elapsed:.1f}s"
+                f"lr={current_lr:.6f} time={elapsed:.1f}s"
             )
+            if scheduler is not None:
+                scheduler.step()
 
             state = {
                 "model_state_dict": model.state_dict(),
@@ -678,10 +758,20 @@ def main():
                     if loader is None:
                         continue
                     class_dice = compute_per_class_dice(
-                        model, loader, device, metric_class_ids
+                        model,
+                        loader,
+                        device,
+                        metric_class_ids,
+                        train_label_map=label_map,
+                        eval_label_map=eval_label_map,
                     )
                     log_class_metrics(
-                        epoch, split, class_dice, class_metrics_logger, logger, label_map
+                        epoch,
+                        split,
+                        class_dice,
+                        class_metrics_logger,
+                        logger,
+                        eval_label_map or label_map,
                     )
 
             if (
