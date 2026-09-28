@@ -1,7 +1,7 @@
 [experiments]
-name = "2026-09-28_006_PSC-UNet_V5_A"
+name = "2026-09-28_006_PSC-UNet_V5_C"
 date = "2026-09-28"
-description = "V5: guaranteed_sampling + skip_absent_classes | Adam + CosineAnnealingLR."
+description = "V5: guaranteed_sampling + skip_absent_classes | AdamW + ReduceLROnPlateau(val_eval_dice)."
 runs_dir = "runs"
 
 [dataset]
@@ -22,9 +22,11 @@ learning_rate = 0.0001
 weight_decay = 0.001
 num_epochs = 300
 momentum = 0.9
-optimizer = "adam"
-lr_scheduler = "cosine"
-lr_min = 0.000001
+optimizer = "adamw"
+lr_scheduler = "plateau"
+lr_plateau_factor = 0.5
+lr_plateau_patience = 15
+lr_plateau_min_lr = 0.000001
 
 [model]
 base_dim = 32
@@ -60,14 +62,3 @@ save_predictions_splits = ["train", "val", "test"]
 save_visualizations = true
 save_visualizations_splits = ["train", "val", "test"]
 visualize_num = 100
-# 仅对以下切片做预测与可视化；设为空则处理整个 split
-# target_slices = [
-#     "0002_slice0037",
-#     "0004_slice0026",
-#     "0004_slice0032",
-#     "0007_slice0035",
-#     "0002_slice0031",
-#     "0033_slice0011",
-#     "0026_slice0011",
-#     "0007_slice0050",
-# ]

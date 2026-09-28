@@ -24,6 +24,11 @@ ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.utils.data.synapse.augment import AugmentConfig, apply_augmentation, build_augment_config
+from src.utils.data.synapse.class_guaranteed_sampler import (
+    ClassGuaranteedEpochSampler,
+    build_sample_pools,
+    format_class_groups,
+)
 from src.utils.data.synapse.labels import (
     ALL_METRIC_CLASS_IDS,
     EVAL_CLASS_IDS,
@@ -351,9 +356,50 @@ def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
     return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 
+DEFAULT_GUARANTEED_CLASS_GROUPS = [[4], [11], [12, 13]]
+
+
+def build_train_dataloader(
+    train_set: SynapseSliceDataset,
+    batch_size: int,
+    num_workers: int,
+    pin_memory: bool,
+    train_cfg: dict,
+) -> tuple[DataLoader, ClassGuaranteedEpochSampler | None]:
+    train_sampler: ClassGuaranteedEpochSampler | None = None
+    if train_cfg.get("guaranteed_sampling", False):
+        class_groups = train_cfg.get(
+            "guaranteed_class_groups", DEFAULT_GUARANTEED_CLASS_GROUPS
+        )
+        class_groups = [[int(v) for v in group] for group in class_groups]
+        min_samples_per_group = int(
+            train_cfg.get("min_samples_per_group_per_epoch", batch_size)
+        )
+        pools = build_sample_pools(train_set.samples, train_set.label_dir, class_groups)
+        train_sampler = ClassGuaranteedEpochSampler(
+            dataset_size=len(train_set),
+            pools=pools,
+            min_samples_per_group=min_samples_per_group,
+            seed=int(train_cfg.get("sampler_seed", 42)),
+            group_names=format_class_groups(class_groups),
+        )
+
+    train_loader = DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    return train_loader, train_sampler
+
+
 def build_lr_scheduler(
-    hyper_cfg: dict, optimizer: torch.optim.Optimizer
-) -> torch.optim.lr_scheduler.LRScheduler | None:
+    hyper_cfg: dict,
+    optimizer: torch.optim.Optimizer,
+    num_epochs: int,
+):
     scheduler_name = str(hyper_cfg.get("lr_scheduler", "")).lower()
     if scheduler_name == "step":
         return torch.optim.lr_scheduler.StepLR(
@@ -361,7 +407,53 @@ def build_lr_scheduler(
             step_size=int(hyper_cfg.get("lr_step_size", 50)),
             gamma=float(hyper_cfg.get("lr_gamma", 0.5)),
         )
+    if scheduler_name == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=int(hyper_cfg.get("lr_cosine_t_max", num_epochs)),
+            eta_min=float(hyper_cfg.get("lr_min", 1e-6)),
+        )
+    if scheduler_name == "plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="max",
+            factor=float(hyper_cfg.get("lr_plateau_factor", 0.5)),
+            patience=int(hyper_cfg.get("lr_plateau_patience", 15)),
+            min_lr=float(hyper_cfg.get("lr_plateau_min_lr", 1e-6)),
+        )
     return None
+
+
+def describe_lr_scheduler(hyper_cfg: dict, num_epochs: int) -> str:
+    scheduler_name = str(hyper_cfg.get("lr_scheduler", "")).lower()
+    if scheduler_name == "step":
+        return (
+            f"StepLR(step_size={hyper_cfg.get('lr_step_size', 50)}, "
+            f"gamma={hyper_cfg.get('lr_gamma', 0.5)})"
+        )
+    if scheduler_name == "cosine":
+        return (
+            f"CosineAnnealingLR(T_max={hyper_cfg.get('lr_cosine_t_max', num_epochs)}, "
+            f"eta_min={hyper_cfg.get('lr_min', 1e-6)})"
+        )
+    if scheduler_name == "plateau":
+        return (
+            f"ReduceLROnPlateau(mode=max, factor={hyper_cfg.get('lr_plateau_factor', 0.5)}, "
+            f"patience={hyper_cfg.get('lr_plateau_patience', 15)}, "
+            f"min_lr={hyper_cfg.get('lr_plateau_min_lr', 1e-6)})"
+        )
+    return "none"
+
+
+def step_lr_scheduler(scheduler, metric: float | None = None) -> None:
+    if scheduler is None:
+        return
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        if metric is None:
+            raise ValueError("ReduceLROnPlateau 需要传入 val 指标")
+        scheduler.step(metric)
+    else:
+        scheduler.step()
 
 
 def train_one_epoch(
@@ -599,12 +691,12 @@ def main():
         repeat_gray_to_rgb=repeat_gray_to_rgb,
         label_map=label_map,
     )
-    train_loader = DataLoader(
+    train_loader, train_sampler = build_train_dataloader(
         train_set,
         batch_size=batch_size,
-        shuffle=True,
         num_workers=num_workers,
         pin_memory=device.type == "cuda",
+        train_cfg=train_cfg,
     )
     val_loader = DataLoader(
         val_set,
@@ -631,7 +723,7 @@ def main():
         ce_weight=ce_loss_weight,
     ).to(device)
     optimizer = build_optimizer(hyper_cfg, model)
-    scheduler = build_lr_scheduler(hyper_cfg, optimizer)
+    scheduler = build_lr_scheduler(hyper_cfg, optimizer, num_epochs)
 
     logger = setup_file_logger(run.run_dir)
     ckpt_mgr = CheckpointManager(run.checkpoints_dir)
@@ -683,15 +775,38 @@ def main():
                 f"Early stopping: patience={early_stopping_patience}, "
                 f"min_delta={early_stopping_min_delta}"
             )
-        if scheduler is not None:
+        logger.info(
+            f"Optimizer: {hyper_cfg.get('optimizer', 'adam')} | "
+            f"LR scheduler: {describe_lr_scheduler(hyper_cfg, num_epochs)}"
+        )
+        logger.info(
+            f"skip_absent_classes={bool(train_cfg.get('skip_absent_classes', True))}"
+        )
+        if train_sampler is not None:
             logger.info(
-                f"LR scheduler: StepLR(step_size={hyper_cfg.get('lr_step_size', 50)}, "
-                f"gamma={hyper_cfg.get('lr_gamma', 0.5)})"
+                "Guaranteed sampling enabled: "
+                + ", ".join(
+                    f"{name}={size}"
+                    for name, size in zip(
+                        train_sampler.group_names, train_sampler.pool_sizes
+                    )
+                )
             )
+            logger.info(
+                f"Min samples per group per epoch: "
+                f"{train_sampler.min_samples_per_group}"
+            )
+            if label_map == "eval8":
+                logger.info(
+                    "注意: eval8 下肾上腺(12/13)会被映射为背景，"
+                    "但仍会保证含肾上腺的切片进入训练。"
+                )
 
         epochs_without_improve = 0
         completed_epochs = 0
         for epoch in range(1, num_epochs + 1):
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
             start = time.time()
             train_loss, train_dice, train_eval_dice = train_one_epoch(
                 model,
@@ -735,8 +850,7 @@ def main():
                 f"val_eval_dice={val_eval_dice:.4f} "
                 f"lr={current_lr:.6f} time={elapsed:.1f}s"
             )
-            if scheduler is not None:
-                scheduler.step()
+            step_lr_scheduler(scheduler, val_eval_dice)
 
             state = {
                 "model_state_dict": model.state_dict(),

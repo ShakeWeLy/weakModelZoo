@@ -60,14 +60,3 @@ save_predictions_splits = ["train", "val", "test"]
 save_visualizations = true
 save_visualizations_splits = ["train", "val", "test"]
 visualize_num = 100
-# 仅对以下切片做预测与可视化；设为空则处理整个 split
-# target_slices = [
-#     "0002_slice0037",
-#     "0004_slice0026",
-#     "0004_slice0032",
-#     "0007_slice0035",
-#     "0002_slice0031",
-#     "0033_slice0011",
-#     "0026_slice0011",
-#     "0007_slice0050",
-# ]
