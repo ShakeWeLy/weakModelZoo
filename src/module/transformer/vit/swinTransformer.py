@@ -178,6 +178,65 @@ class PatchMerging(nn.Module):
         return x
 
 
+class PatchExpanding(nn.Module):
+    """Patch Expanding：空间分辨率 x2、通道数减半。输入输出均为 [B, H, W, C]。"""
+
+    def __init__(self, embed_dim: int, ratio: int = 2):
+        super().__init__()
+        if ratio != 2:
+            raise ValueError("当前 PatchExpanding 仅支持 ratio=2")
+        self.embed_dim = embed_dim
+        self.out_dim = embed_dim // 2
+        self.expand = nn.Linear(embed_dim, embed_dim * ratio, bias=False)
+        self.norm = nn.LayerNorm(self.out_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, height, width, channels = x.shape
+        if channels != self.embed_dim:
+            raise ValueError(f"输入通道应为 {self.embed_dim}，当前为 {channels}")
+
+        x = self.expand(x)
+        x = x.view(batch_size, height, width, 2, 2, self.out_dim)
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+        x = x.view(batch_size, height * 2, width * 2, self.out_dim)
+        return self.norm(x)
+
+
+class FinalPatchExpanding(nn.Module):
+    """最终上采样至原始分辨率。输入输出均为 [B, H, W, C]。"""
+
+    def __init__(self, embed_dim: int, patch_size: int = 4):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.patch_size = patch_size
+        self.out_dim = embed_dim // patch_size
+        self.expand = nn.Linear(embed_dim, embed_dim * patch_size, bias=False)
+        self.norm = nn.LayerNorm(self.out_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, height, width, channels = x.shape
+        if channels != self.embed_dim:
+            raise ValueError(f"输入通道应为 {self.embed_dim}，当前为 {channels}")
+
+        x = self.expand(x)
+        x = x.view(
+            batch_size,
+            height,
+            width,
+            self.patch_size,
+            self.patch_size,
+            self.out_dim,
+        )
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+        x = x.view(
+            batch_size,
+            height * self.patch_size,
+            width * self.patch_size,
+            self.out_dim,
+        )
+        return self.norm(x)
+
+
 class SwinTransformerBlock(nn.Module):
     """Swin Transformer Block: LN → W-MSA/SW-MSA → 残差 → LN → MLP → 残差。"""
 
