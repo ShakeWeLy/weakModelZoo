@@ -1,7 +1,6 @@
-from src.models.segment import SwinUNet, TransUNet, UNet
+from src.models.segment import TransUNet, UNet
 
 __all__ = [
-    "SwinUNet",
     "TransUNet",
     "UNet",
 ]
