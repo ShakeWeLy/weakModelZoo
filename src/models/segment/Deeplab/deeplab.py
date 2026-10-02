@@ -3,9 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models.common.VGG import VGG16
-
-
 class Backbone(VGG16):
+    fn6: nn.Module
     def __init__(self, num_classes: int = 21) -> None:
         super().__init__(num_classes)
         # 分割：不再下采样，保持 layer4 输出的 28×28（224 输入）
@@ -20,7 +19,7 @@ class Backbone(VGG16):
         )
         # layer5 输出 256 通道；原 fn6 写 512 会与主分支 forward 不一致
         self.fn6 = nn.Conv2d(256, 4096, kernel_size=3, stride=1, padding=4, dilation=4)
-        self.fn7 = nn.Conv2d(4096, 4096, kernel_size=1, stride=1)
+        self.fn7: nn.Module = nn.Conv2d(4096, 4096, kernel_size=1, stride=1)
         # 覆盖父类 Linear fc8：主分支输出与 skip 同形状的 score map
         self.fc8 = nn.Conv2d(4096, num_classes, kernel_size=1, stride=1)
 

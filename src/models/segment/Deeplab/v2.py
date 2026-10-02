@@ -45,7 +45,7 @@ class DeeplabV2(DeeplabV1):
         self.backbone.fc8 = nn.Conv2d(aspp_out_channels, num_classes, kernel_size=1)
         # V2 不用 fn6/fn7，保留模块避免误走 V1 路径时仍占位（可选，仅占参数名）
         self.backbone.fn6 = nn.Identity()
-        self.backbone.fn7 = nn.Identity()
+        self.backbone.fn7 = nn.Identity()  # type: ignore[assignment]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         s0 = x
