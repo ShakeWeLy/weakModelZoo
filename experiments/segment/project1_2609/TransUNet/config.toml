@@ -1,0 +1,49 @@
+[experiments]
+name = "2026-09-29_001_TransUNet_V1"
+date = "2026-09-29"
+description = "TransUNet: UNet encoder + Transformer×12 bottleneck + UNet decoder; Dice + CE baseline aligned with UNet_V7."
+runs_dir = "runs"
+
+[dataset]
+image_size = 224
+batch_size = 8
+num_workers = 1
+
+[hyperparameters]
+learning_rate = 0.0001
+weight_decay = 0.0001
+num_epochs = 300
+momentum = 0.9
+optimizer = "adam"
+
+[model]
+hidden_channels = 64
+class_nums = 9
+label_map = "eval8"
+transformer_depth = 12
+num_heads = 8
+# ffn_hidden_channels = 4096  # 默认 bottleneck_channels * 4
+
+[train]
+data_dir = "data/synapse_processed"
+device = "cuda"
+class_metrics_every = 10
+class_metrics_splits = ["val", "train"]
+val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
+dice_loss_weight = 1.0
+ce_loss_weight = 1.0
+skip_absent_classes = false
+early_stopping_patience = 50
+early_stopping_min_delta = 0.0
+
+[test]
+data_dir = "data/synapse_processed"
+device = "cuda"
+splits = ["train", "val", "test"]
+save_predictions = true
+save_predictions_splits = ["train", "val", "test"]
+save_visualizations = true
+save_visualizations_splits = ["train", "val", "test"]
+visualize_num = 100

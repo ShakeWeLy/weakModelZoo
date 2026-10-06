@@ -1,0 +1,66 @@
+[experiments]
+name = "2026-10-06_001_Swin-UNet_V1"
+date = "2026-10-06"
+description = "Swin-UNet: Swin Transformer Block 替换 UNet 卷积块 | Dice + CE + guaranteed_sampling."
+runs_dir = "runs"
+
+[dataset]
+image_size = 224
+batch_size = 8
+num_workers = 1
+augment = true
+flip_horizontal = true
+flip_vertical = true
+rotate = true
+intensity_jitter = true
+intensity_scale = [0.9, 1.1]
+intensity_shift = [-0.1, 0.1]
+gaussian_noise_std = 0.02
+
+[hyperparameters]
+learning_rate = 0.0001
+weight_decay = 0.001
+num_epochs = 300
+momentum = 0.9
+optimizer = "adam"
+lr_scheduler = "cosine"
+lr_min = 0.000001
+
+[model]
+embed_dim = 96
+class_nums = 9
+in_channels = 1
+depths = [2, 2, 2, 2]
+depths_decoder = [2, 2, 2, 2]
+num_heads = [3, 6, 12, 24]
+window_size = 7
+patch_size = 4
+mlp_ratio = 4.0
+repeat_gray_to_rgb = false
+label_map = "eval8"
+
+[train]
+data_dir = "data/synapse_processed"
+device = "cuda"
+class_metrics_every = 10
+class_metrics_splits = ["val", "train"]
+val_metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
+dice_loss_weight = 1.0
+ce_loss_weight = 1.0
+skip_absent_classes = true
+guaranteed_sampling = true
+min_samples_per_group_per_epoch = 8
+early_stopping_patience = 80
+early_stopping_min_delta = 0.0
+
+[test]
+data_dir = "data/synapse_processed"
+device = "cuda"
+splits = ["train", "val", "test"]
+save_predictions = true
+save_predictions_splits = ["train", "val", "test"]
+save_visualizations = true
+save_visualizations_splits = ["train", "val", "test"]
+visualize_num = 100
