@@ -14,6 +14,7 @@ import random
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
@@ -128,8 +129,8 @@ class TransUNetRandomGenerator:
                 (self.output_size[0] / x, self.output_size[1] / y),
                 order=0,
             )
-        image = torch.from_numpy(image.astype(np.float32)).unsqueeze(0)
-        label = torch.from_numpy(label.astype(np.float32)).long()
+        image = torch.from_numpy(np.asarray(image, dtype=np.float32)).unsqueeze(0)
+        label = torch.from_numpy(np.asarray(label, dtype=np.float32)).long()
         return {"image": image, "label": label}
 
 
@@ -186,6 +187,7 @@ class TransUNetSliceDataset(Dataset):
             raise FileNotFoundError("TransUNet 切片列表为空")
         if not self.npz_dir.is_dir():
             raise FileNotFoundError(f"未找到 train_npz: {self.npz_dir}")
+        self.augment_config: AugmentConfig | None = None
 
     def __len__(self) -> int:
         return len(self.sample_names)
@@ -311,7 +313,7 @@ class TransUNetVolumeSliceDataset(Dataset):
             if not path.exists():
                 continue
             with h5py.File(path, "r") as f:
-                depth = f["image"].shape[0]
+                depth = cast(h5py.Dataset, f["image"]).shape[0]
             for z in range(depth):
                 self.items.append((vol, z))
         if not self.items:
@@ -323,8 +325,8 @@ class TransUNetVolumeSliceDataset(Dataset):
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, str]:
         vol, z = self.items[index]
         with h5py.File(self.vol_dir / f"{vol}.npy.h5", "r") as f:
-            image = f["image"][z]
-            label = f["label"][z]
+            image = cast(np.ndarray, cast(h5py.Dataset, f["image"])[z])
+            label = cast(np.ndarray, cast(h5py.Dataset, f["label"])[z])
         out = self.transform({"image": image, "label": label})
         image, label = out["image"], out["label"]
         if self.repeat_gray_to_rgb:
@@ -453,11 +455,13 @@ class ModelZooInferenceDataset(Dataset):
         return image, label, image_path.name
 
 
+SynapseTrainValDataset = TransUNetSliceDataset | SynapseSliceDataset
+
 DEFAULT_GUARANTEED_CLASS_GROUPS = [[4], [5], [6]]
 
 
 def build_train_dataloader(
-    train_set: Dataset,
+    train_set: SynapseTrainValDataset,
     batch_size: int,
     num_workers: int,
     pin_memory: bool,
@@ -503,7 +507,7 @@ def build_train_val_datasets(
     dataset_cfg: dict,
     model_cfg: dict,
     train_cfg: dict,
-) -> tuple[Dataset, Dataset]:
+) -> tuple[SynapseTrainValDataset, SynapseTrainValDataset]:
     fmt = get_dataset_format(dataset_cfg, train_cfg)
     image_size = int(dataset_cfg["image_size"])
     num_classes = int(model_cfg["class_nums"])
