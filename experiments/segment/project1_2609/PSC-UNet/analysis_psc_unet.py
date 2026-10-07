@@ -22,8 +22,12 @@ from scipy.ndimage import binary_erosion, distance_transform_edt
 from torch.utils.data import DataLoader, Dataset
 
 EXP_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = EXP_DIR.parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(PROJECT_DIR))
+
+from synapse_dataloader import build_inference_dataset, get_dataset_format
 
 from src.utils.data.synapse.labels import (
     EVAL_MODEL_CLASS_NUM,
@@ -74,72 +78,6 @@ def build_organ_names_cn_from_metrics(organ_metrics: dict[int, str]) -> dict[str
         original_id = EVAL_MODEL_TO_ORIGINAL.get(class_id, class_id)
         names_cn[organ_name] = metric_class_name_cn(original_id)
     return names_cn
-
-
-def normalize_slice_filenames(slice_names: list[str]) -> list[str]:
-    return [
-        name if name.endswith(".npy") else f"{name}.npy"
-        for name in slice_names
-    ]
-
-
-class InferenceDataset(Dataset):
-    def __init__(
-        self,
-        data_dir: Path,
-        split: str,
-        image_size: int,
-        repeat_gray_to_rgb: bool = False,
-        label_map: str | None = None,
-        target_slices: list[str] | None = None,
-    ):
-        self.image_dir = data_dir / split / "images"
-        self.label_dir = data_dir / split / "labels"
-        self.image_size = image_size
-        self.repeat_gray_to_rgb = repeat_gray_to_rgb
-        self.label_map = label_map
-        all_samples = sorted(self.image_dir.glob("*.npy"))
-        if target_slices:
-            wanted = set(normalize_slice_filenames(target_slices))
-            self.samples = [path for path in all_samples if path.name in wanted]
-            missing = sorted(wanted - {path.name for path in self.samples})
-            if missing:
-                raise FileNotFoundError(
-                    f"{self.image_dir} 中未找到指定切片: {', '.join(missing)}"
-                )
-        else:
-            self.samples = all_samples
-        if not self.samples:
-            raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, index: int):
-        image_path = self.samples[index]
-        image = np.load(image_path).astype("float32")
-        image = torch.from_numpy(image).unsqueeze(0)
-        image = F.interpolate(
-            image.unsqueeze(0),
-            size=(self.image_size, self.image_size),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)
-        if self.repeat_gray_to_rgb:
-            image = image.repeat(3, 1, 1)
-
-        label_path = self.label_dir / image_path.name
-        if label_path.exists():
-            label = apply_label_map(np.load(label_path).astype("int64"), self.label_map)
-            label = torch.from_numpy(label).unsqueeze(0).unsqueeze(0).float()
-            label = F.interpolate(
-                label,
-                size=(self.image_size, self.image_size),
-                mode="nearest",
-            ).squeeze(0).squeeze(0).long()
-        else:
-            label = torch.full((self.image_size, self.image_size), -1, dtype=torch.long)
-        return image, label, image_path.name
 
 
 def load_config(config_path: Path) -> dict:
@@ -743,7 +681,6 @@ def main():
     test_cfg = cfg.get("test", {})
 
     run = resolve_experiment_run(EXP_DIR, cfg)
-    data_dir = ROOT / test_cfg.get("data_dir", train_cfg.get("data_dir", "data/synapse_processed"))
     output_dir = run.predictions_dir
     checkpoint_path = run.best_checkpoint
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -795,12 +732,12 @@ def main():
             split, visualization_splits, default_visualization_splits
         )
         try:
-            dataset = InferenceDataset(
-                data_dir,
+            dataset = build_inference_dataset(
                 split,
-                image_size,
-                repeat_gray_to_rgb=repeat_gray_to_rgb,
-                label_map=label_map,
+                dataset_cfg,
+                model_cfg,
+                train_cfg,
+                test_cfg,
                 target_slices=target_slices or None,
             )
         except FileNotFoundError as exc:

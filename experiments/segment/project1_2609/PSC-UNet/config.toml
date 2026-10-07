@@ -1,14 +1,17 @@
 [experiments]
-name = "2026-09-28_006_PSC-UNet_V5_A"
-date = "2026-09-28"
-description = "V5: guaranteed_sampling + skip_absent_classes | Adam + CosineAnnealingLR."
+name = "2026-10-07_001_PSC-UNet_V1"
+date = "2026-10-07"
+description = "V1: Fix dataset."
 runs_dir = "runs"
 
 [dataset]
+format = "transunet"
 image_size = 224
 batch_size = 8
-num_workers = 1
+num_workers = 0
+# TransUNet 管线：RandomGenerator（与 Swin-Unet 一致）；下方 flip/intensity 仅 modelzoo 格式生效
 augment = true
+list_dir = "F:/myproject/weakUnet/Swin-Unet/lists/lists_Synapse"
 flip_horizontal = true
 flip_vertical = true
 rotate = true
@@ -33,10 +36,12 @@ in_channels = 1
 swin_depths = [1, 1, 1, 1]
 repeat_gray_to_rgb = false
 dropout = 0.15
-label_map = "eval8"
+# TransUNet npz 标签已是 0..8，无需 eval8
+label_map = ""
 
 [train]
-data_dir = "data/synapse_processed"
+data_dir = "F:/myproject/weakUnet/data/Synapse"
+val_holdout_cases = 2
 device = "cuda"
 class_metrics_every = 10
 class_metrics_splits = ["val", "train"]
@@ -46,28 +51,18 @@ dice_class_weights = [1, 1, 1, 1, 1, 1, 1, 1]
 dice_loss_weight = 1.0
 ce_loss_weight = 1.0
 skip_absent_classes = true
-guaranteed_sampling = true
+guaranteed_sampling = false
 min_samples_per_group_per_epoch = 8
 early_stopping_patience = 80
 early_stopping_min_delta = 0.0
 
 [test]
-data_dir = "data/synapse_processed"
+data_dir = "F:/myproject/weakUnet/data/Synapse"
+list_dir = "F:/myproject/weakUnet/Swin-Unet/lists/lists_Synapse"
 device = "cuda"
 splits = ["train", "val", "test"]
 save_predictions = true
-save_predictions_splits = ["train", "val", "test"]
+save_predictions_splits = ["val", "test"]
 save_visualizations = true
-save_visualizations_splits = ["train", "val", "test"]
+save_visualizations_splits = ["val", "test"]
 visualize_num = 100
-# 仅对以下切片做预测与可视化；设为空则处理整个 split
-# target_slices = [
-#     "0002_slice0037",
-#     "0004_slice0026",
-#     "0004_slice0032",
-#     "0007_slice0035",
-#     "0002_slice0031",
-#     "0033_slice0011",
-#     "0026_slice0011",
-#     "0007_slice0050",
-# ]

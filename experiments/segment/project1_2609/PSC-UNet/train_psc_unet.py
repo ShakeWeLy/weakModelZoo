@@ -17,17 +17,19 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 EXP_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = EXP_DIR.parent
 ROOT = EXP_DIR.parents[3]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils.data.synapse.augment import AugmentConfig, apply_augmentation, build_augment_config
-from src.utils.data.synapse.class_guaranteed_sampler import (
-    ClassGuaranteedEpochSampler,
-    build_sample_pools,
-    format_class_groups,
+from synapse_dataloader import (
+    build_train_dataloader,
+    build_train_val_datasets,
+    get_dataset_format,
+    validate_image_size,
 )
 from src.utils.data.synapse.labels import (
     ALL_METRIC_CLASS_IDS,
@@ -35,7 +37,6 @@ from src.utils.data.synapse.labels import (
     EVAL_MODEL_CLASS_IDS,
     EVAL_MODEL_CLASS_NUM,
     LABEL_NAMES,
-    apply_label_map,
     eval_model_class_name,
     remap_to_eval_model_torch,
     resolve_eval_label_map,
@@ -67,82 +68,6 @@ def load_psc_unet_class():
 
 
 PSC_UNet = load_psc_unet_class()
-
-
-class SynapseSliceDataset(Dataset):
-    def __init__(
-        self,
-        data_dir: Path,
-        split: str,
-        image_size: int,
-        num_classes: int,
-        repeat_gray_to_rgb: bool = False,
-        label_map: str | None = None,
-        augment_config: AugmentConfig | None = None,
-    ):
-        self.image_dir = data_dir / split / "images"
-        self.label_dir = data_dir / split / "labels"
-        self.image_size = image_size
-        self.num_classes = num_classes
-        self.repeat_gray_to_rgb = repeat_gray_to_rgb
-        self.label_map = label_map
-        self.augment_config = augment_config
-        self.samples = sorted(self.image_dir.glob("*.npy"))
-        if not self.samples:
-            raise FileNotFoundError(f"{self.image_dir} 下未找到 .npy 切片")
-        self._validate_labels()
-
-    def _validate_labels(self) -> None:
-        import numpy as np
-
-        max_label = 0
-        min_label = 0
-        for image_path in self.samples:
-            label = np.load(self.label_dir / image_path.name)
-            label = apply_label_map(label, self.label_map)
-            max_label = max(max_label, int(label.max()))
-            min_label = min(min_label, int(label.min()))
-        if min_label < 0:
-            raise ValueError(f"{self.label_dir} 存在负标签值: {min_label}")
-        if max_label >= self.num_classes:
-            raise ValueError(
-                f"标签最大值 {max_label} 超出 class_nums={self.num_classes}，"
-                f"请将 config.toml 中 class_nums 设为 {max_label + 1}"
-            )
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, index: int):
-        import numpy as np
-
-        image_path = self.samples[index]
-        label_path = self.label_dir / image_path.name
-        image = np.load(image_path).astype("float32")
-        label = np.load(label_path).astype("int64")
-        label = apply_label_map(label, self.label_map)
-
-        image = torch.from_numpy(image).unsqueeze(0)
-        label = torch.from_numpy(label)
-
-        image = F.interpolate(
-            image.unsqueeze(0),
-            size=(self.image_size, self.image_size),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)
-        label = F.interpolate(
-            label.unsqueeze(0).unsqueeze(0).float(),
-            size=(self.image_size, self.image_size),
-            mode="nearest",
-        ).squeeze(0).squeeze(0).long()
-
-        if self.augment_config is not None:
-            image, label = apply_augmentation(image, label, self.augment_config)
-
-        if self.repeat_gray_to_rgb:
-            image = image.repeat(3, 1, 1)
-        return image, label
 
 
 class DiceLoss(nn.Module):
@@ -306,18 +231,6 @@ def build_ce_class_weights(
     return None
 
 
-def validate_image_size(image_size: int, patch_size: int = 4, window_size: int = 7) -> None:
-    if image_size % 32 != 0:
-        raise ValueError(
-            f"PSC-UNet 要求 image_size 能被 32 整除（patch=4 + 3 次 2x 下采样），当前为 {image_size}"
-        )
-    if (image_size // patch_size) % window_size != 0:
-        raise ValueError(
-            f"PSC-UNet 要求 image_size/{patch_size} 能被 window_size={window_size} 整除，"
-            f"当前 image_size={image_size}"
-        )
-
-
 def load_config(config_path: Path) -> dict:
     with config_path.open("rb") as f:
         return tomllib.load(f)
@@ -354,45 +267,6 @@ def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
     if optimizer_name == "adamw":
         return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-
-DEFAULT_GUARANTEED_CLASS_GROUPS = [[4], [11], [12, 13]]
-
-
-def build_train_dataloader(
-    train_set: SynapseSliceDataset,
-    batch_size: int,
-    num_workers: int,
-    pin_memory: bool,
-    train_cfg: dict,
-) -> tuple[DataLoader, ClassGuaranteedEpochSampler | None]:
-    train_sampler: ClassGuaranteedEpochSampler | None = None
-    if train_cfg.get("guaranteed_sampling", False):
-        class_groups = train_cfg.get(
-            "guaranteed_class_groups", DEFAULT_GUARANTEED_CLASS_GROUPS
-        )
-        class_groups = [[int(v) for v in group] for group in class_groups]
-        min_samples_per_group = int(
-            train_cfg.get("min_samples_per_group_per_epoch", batch_size)
-        )
-        pools = build_sample_pools(train_set.samples, train_set.label_dir, class_groups)
-        train_sampler = ClassGuaranteedEpochSampler(
-            dataset_size=len(train_set),
-            pools=pools,
-            min_samples_per_group=min_samples_per_group,
-            seed=int(train_cfg.get("sampler_seed", 42)),
-            group_names=format_class_groups(class_groups),
-        )
-
-    train_loader = DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=train_sampler is None,
-        sampler=train_sampler,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-    )
-    return train_loader, train_sampler
 
 
 def build_lr_scheduler(
@@ -617,7 +491,6 @@ def main():
         dataset_cfg["batch_size"] = 1
         model_cfg["swin_depths"] = [1, 1, 1, 1]
 
-    data_dir = ROOT / train_cfg.get("data_dir", "data/synapse_processed")
     run = create_experiment_run(
         resolve_runs_root(EXP_DIR, cfg),
         experiment_name,
@@ -671,26 +544,10 @@ def main():
         in_channels = 3
 
     validate_image_size(image_size)
-    augment_config = build_augment_config(dataset_cfg)
     model_dropout = float(model_cfg.get("dropout", 0.0))
 
-    train_set = SynapseSliceDataset(
-        data_dir,
-        "train",
-        image_size,
-        num_classes,
-        repeat_gray_to_rgb=repeat_gray_to_rgb,
-        label_map=label_map,
-        augment_config=augment_config,
-    )
-    val_set = SynapseSliceDataset(
-        data_dir,
-        "val",
-        image_size,
-        num_classes,
-        repeat_gray_to_rgb=repeat_gray_to_rgb,
-        label_map=label_map,
-    )
+    train_set, val_set = build_train_val_datasets(dataset_cfg, model_cfg, train_cfg)
+    augment_config = getattr(train_set, "augment_config", None)
     train_loader, train_sampler = build_train_dataloader(
         train_set,
         batch_size=batch_size,
@@ -744,7 +601,11 @@ def main():
             f"class_nums={num_classes}, label_map={label_map or 'none'}, "
             f"eval_label_map={eval_label_map or 'none'}"
         )
-        if augment_config.enabled:
+        data_format = get_dataset_format(dataset_cfg, train_cfg)
+        logger.info(f"Dataset format: {data_format}")
+        if data_format == "transunet" and dataset_cfg.get("augment", True):
+            logger.info("Augmentation: TransUNet RandomGenerator (rot/flip + zoom)")
+        elif augment_config is not None and augment_config.enabled:
             logger.info(
                 "Augmentation: flip_h=%s flip_v=%s rotate=%s intensity_jitter=%s "
                 "scale=%s shift=%s noise_std=%s"
