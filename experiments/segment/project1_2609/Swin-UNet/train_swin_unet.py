@@ -4,6 +4,7 @@
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --epochs 1 --quick
+    python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py -n 2026-10-08_002_Swin-UNet_V2
 """
 
 from __future__ import annotations
@@ -346,6 +347,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="快速试跑：embed_dim=48, batch_size=1, depths/depths_decoder=[1,1,1,1]",
     )
+    parser.add_argument(
+        "-n",
+        "--n",
+        "--name",
+        dest="run_name",
+        default=None,
+        metavar="NAME",
+        help="覆盖 [experiments].name 创建新 run；其余仍读 config.toml，且不写回 config.toml",
+    )
     return parser.parse_args()
 
 
@@ -623,10 +633,15 @@ def main():
     model_cfg = cfg["model"]
     train_cfg = cfg.get("train", {})
 
-    exp_cfg = cfg.get("experiments", {})
+    exp_cfg = cfg.setdefault("experiments", {})
+    if args.run_name is not None:
+        run_name = str(args.run_name).strip()
+        if not run_name:
+            raise ValueError("--n / --name 不能为空")
+        exp_cfg["name"] = run_name
     experiment_name = exp_cfg.get("name")
     if not experiment_name:
-        raise ValueError("config 缺少 [experiments].name，每次训练请指定唯一名称")
+        raise ValueError("config 缺少 [experiments].name（可用 -n / --name 指定）")
 
     num_epochs = int(args.epochs or hyper_cfg["num_epochs"])
     hyper_cfg["num_epochs"] = num_epochs

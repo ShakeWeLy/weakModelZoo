@@ -46,7 +46,7 @@ repeat_gray_to_rgb = true
 label_map = "eval8"
 
 [train]
-data_dir = "data/synapse_processed"
+data_dir = "data/weakUnet_Synapse"
 device = "cuda"
 class_metrics_every = 10
 class_metrics_splits = ["val", "train"]
@@ -62,7 +62,7 @@ early_stopping_patience = 80
 early_stopping_min_delta = 0.0
 
 [test]
-data_dir = "data/synapse_processed"
+data_dir = "data/weakUnet_Synapse"
 device = "cuda"
 splits = ["train", "val", "test"]
 save_predictions = true

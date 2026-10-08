@@ -514,8 +514,13 @@ def build_train_val_datasets(
     repeat_gray_to_rgb = bool(model_cfg.get("repeat_gray_to_rgb", False))
 
     if fmt == "transunet":
-        synapse_root = resolve_data_dir(train_cfg.get("data_dir") or dataset_cfg.get("data_dir"))
-        list_dir = resolve_list_dir(dataset_cfg.get("list_dir") or train_cfg.get("list_dir"))
+        # transunet 布局（train_npz）以 [dataset] 为准，避免 [train] 仍指向 synapse_processed 时被误用
+        synapse_root = resolve_data_dir(
+            dataset_cfg.get("data_dir") or train_cfg.get("data_dir")
+        )
+        list_dir = resolve_list_dir(
+            dataset_cfg.get("list_dir") or train_cfg.get("list_dir")
+        )
         val_cases = int(train_cfg.get("val_holdout_cases", 2))
         seed = int(train_cfg.get("sampler_seed", 42))
         train_names, val_names = split_transunet_train_val(
@@ -588,10 +593,14 @@ def build_inference_dataset(
 
     if fmt == "transunet":
         synapse_root = resolve_data_dir(
-            test_cfg.get("data_dir") or train_cfg.get("data_dir") or dataset_cfg.get("data_dir")
+            dataset_cfg.get("data_dir")
+            or test_cfg.get("data_dir")
+            or train_cfg.get("data_dir")
         )
         list_dir = resolve_list_dir(
-            dataset_cfg.get("list_dir") or train_cfg.get("list_dir") or test_cfg.get("list_dir")
+            dataset_cfg.get("list_dir")
+            or train_cfg.get("list_dir")
+            or test_cfg.get("list_dir")
         )
         return TransUNetInferenceDataset(
             synapse_root,

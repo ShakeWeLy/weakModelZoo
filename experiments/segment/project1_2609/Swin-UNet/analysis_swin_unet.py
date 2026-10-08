@@ -2,6 +2,8 @@
 
 用法（在项目根目录执行）：
     python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py
+    python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
+    python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml --name 2026-10-06_001_Swin-UNet_V1
     python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --split test
 """
 
@@ -154,6 +156,12 @@ def parse_args() -> argparse.Namespace:
         "--config",
         type=Path,
         default=Path(__file__).with_name("config.toml"),
+        help="配置文件路径（默认与本脚本同目录的 config.toml）",
+    )
+    parser.add_argument(
+        "--name",
+        default=None,
+        help="覆盖 [experiments].name，指向 runs/<name>/ 下的 checkpoint（其余仍读 config）",
     )
     parser.add_argument("--split", choices=["train", "val", "test"], default=None)
     parser.add_argument("--device", default=None)
@@ -747,7 +755,7 @@ def main():
     train_cfg = cfg.get("train", {})
     test_cfg = cfg.get("test", {})
 
-    run = resolve_experiment_run(EXP_DIR, cfg)
+    run = resolve_experiment_run(EXP_DIR, cfg, name=args.name)
     data_dir = ROOT / test_cfg.get("data_dir", train_cfg.get("data_dir", "data/synapse_processed"))
     output_dir = run.predictions_dir
     checkpoint_path = run.best_checkpoint

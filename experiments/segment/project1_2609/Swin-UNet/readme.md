@@ -10,7 +10,7 @@
 
 ## 运行
 
-每次训练前在 `config.toml` 中设置唯一的 `[experiments].name`：
+每次训练需唯一的 run 名称：可在 `config.toml` 里改 `[experiments].name`，或用 CLI 覆盖（不改 config 文件）：
 
 ```bash
 # 训练
@@ -19,11 +19,17 @@ python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py
 # 指定配置
 python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
 
+# 沿用 config 其余项，仅指定本次 run 名称（-n / --n / --name）
+python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py -n 2026-10-08_002_Swin-UNet_V2
+
 # 快速试跑 1 个 epoch
 python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --epochs 1 --quick
 
 # 推理与评估（Dice / IoU / Precision / Recall / FP% / FN% / HD95）
 python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py
+python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
+# 同一 config，仅指定要评估的训练 run 名称
+python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml --name 2026-10-06_001_Swin-UNet_V1
 python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --split test
 ```
 

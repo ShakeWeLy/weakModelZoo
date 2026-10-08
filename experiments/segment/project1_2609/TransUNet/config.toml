@@ -1,6 +1,6 @@
 [experiments]
-name = "2026-09-29_001_TransUNet_V1"
-date = "2026-09-29"
+name = "2026-10-08_001_TransUNet_V1"
+date = "2026-10-08"
 description = "TransUNet: UNet encoder + Transformer×12 bottleneck + UNet decoder; Dice + CE baseline aligned with UNet_V7."
 runs_dir = "runs"
 

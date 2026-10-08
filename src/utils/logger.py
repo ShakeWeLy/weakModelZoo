@@ -65,11 +65,17 @@ def resolve_runs_root(exp_dir: Path, cfg: Mapping[str, Any]) -> Path:
     return exp_dir / runs_path
 
 
-def resolve_experiment_run(exp_dir: Path, cfg: Mapping[str, Any]) -> ExperimentRun:
+def resolve_experiment_run(
+    exp_dir: Path,
+    cfg: Mapping[str, Any],
+    *,
+    name: str | None = None,
+) -> ExperimentRun:
     exp_cfg = cfg.get("experiments", {})
-    name = exp_cfg.get("name")
-    if not name:
-        raise ValueError("config 缺少 [experiments].name")
+    resolved_name = name or exp_cfg.get("name")
+    if not resolved_name:
+        raise ValueError("config 缺少 [experiments].name（可用 CLI --name 指定）")
+    name = resolved_name
     run_dir = resolve_runs_root(exp_dir, cfg) / name
     if not run_dir.exists():
         raise FileNotFoundError(f"未找到实验目录: {run_dir}")
