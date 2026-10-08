@@ -1,0 +1,42 @@
+# Swin-UNet：Swin Transformer Block 替换 UNet 卷积块。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = "2026-10-08_001_Swin-UNet_V1"
+description = "Swin-UNet | Dice(0.6) + CE(0.4) + guaranteed_sampling | SGD + poly"
+
+[model]
+arch = "swin_unet"
+display_name = "Swin-UNet"     # 结果目录 project1_2610/Swin-UNet/runs/
+repeat_gray_to_rgb = true      # 输入 3 通道
+
+[model.params]
+embed_dim = 96
+depths = [2, 2, 2, 2]
+depths_decoder = [1, 2, 2, 2]
+num_heads = [3, 6, 12, 24]
+window_size = 7
+patch_size = 4
+mlp_ratio = 4.0
+drop_rate = 0.0
+attn_drop_rate = 0.0
+drop_path_rate = 0.1
+qkv_bias = true
+
+[hyperparameters]
+optimizer = "sgd"
+learning_rate = 0.01
+lr_scheduler = "poly"
+
+[train]
+dice_loss_weight = 0.6
+ce_loss_weight = 0.4
+guaranteed_sampling = true
+early_stopping_patience = 80
+
+[quick.dataset]
+batch_size = 2
+
+[quick.model.params]
+embed_dim = 48
+depths = [1, 1, 1, 1]
+depths_decoder = [1, 1, 1, 1]

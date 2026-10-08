@@ -1,0 +1,29 @@
+# UNet baseline。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = "2026-10-08_001_UNet_V1"
+description = "UNet baseline | Dice loss only | SGD 0.01 + poly | 300 epochs, no early stopping"
+
+[model]
+arch = "unet"
+display_name = "UNet"
+
+[model.params]
+hidden_channels = 64
+
+[hyperparameters]
+optimizer = "sgd"
+learning_rate = 0.01
+momentum = 0.9
+weight_decay = 0.0001
+num_epochs = 300
+lr_scheduler = "poly"
+
+[train]
+dice_loss_weight = 1.0
+ce_loss_weight = 0.0
+skip_absent_classes = false
+early_stopping_patience = 0
+
+[quick.model.params]
+hidden_channels = 16

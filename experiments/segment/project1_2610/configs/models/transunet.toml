@@ -1,0 +1,22 @@
+# TransUNet：UNet encoder + Transformer bottleneck + UNet decoder。image_size 由框架注入。
+
+[experiments]
+name = "2026-10-08_001_TransUNet_V1"
+description = "TransUNet | Transformer x12 bottleneck | Dice + CE | Adam 1e-4"
+
+[model]
+arch = "transunet"
+display_name = "TransUNet"
+
+[model.params]
+hidden_channels = 64
+transformer_depth = 12
+num_heads = 8
+# ffn_hidden_channels = 4096   # 默认 bottleneck_channels * 4
+
+[train]
+skip_absent_classes = false
+
+[quick.model.params]
+hidden_channels = 16
+transformer_depth = 1

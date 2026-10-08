@@ -1,0 +1,15 @@
+# Attention Gate UNet。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = "2026-10-08_001_AttnUNet_V1"
+description = "Attention Gate UNet | Dice + CE | Adam 1e-4"
+
+[model]
+arch = "attn_unet"
+display_name = "AttnUNet"
+
+[model.params]
+hidden_channels = 64
+
+[quick.model.params]
+hidden_channels = 16

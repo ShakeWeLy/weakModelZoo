@@ -1,0 +1,24 @@
+# VM-UNet：VSSBlock（2D selective scan）构建的 UNet。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = "2026-10-08_001_VM-UNet_V1"
+description = "VM-UNet | Dice + CE | Adam 1e-4"
+
+[model]
+arch = "vm_unet"
+display_name = "VM-UNet"
+
+[model.params]
+hidden_channels = 32
+depths = [1, 1, 1, 1]
+depths_decoder = [1, 1, 1, 1]
+patch_size = 4
+d_state = 16
+drop_path_rate = 0.1
+use_checkpoint = true
+
+[dataset]
+batch_size = 2
+
+[quick.model.params]
+hidden_channels = 16

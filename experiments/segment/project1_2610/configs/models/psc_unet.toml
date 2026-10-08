@@ -1,0 +1,29 @@
+# PSC-UNet：ResNet + Swin 双分支。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = "2026-10-08_001_PSC-UNet_V1"
+description = "PSC-UNet | Dice + CE | Adam 1e-4 + cosine"
+
+[model]
+arch = "psc_unet"
+display_name = "PSC-UNet"
+repeat_gray_to_rgb = false
+
+[model.params]
+base_dim = 32
+swin_depths = [1, 1, 1, 1]
+dropout = 0.15
+
+[hyperparameters]
+weight_decay = 0.001
+lr_scheduler = "cosine"
+lr_min = 0.000001
+
+[train]
+early_stopping_patience = 80
+
+[dataset]
+num_workers = 0
+
+[quick.model.params]
+base_dim = 16
