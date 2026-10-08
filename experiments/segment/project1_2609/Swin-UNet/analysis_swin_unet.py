@@ -159,9 +159,13 @@ def parse_args() -> argparse.Namespace:
         help="配置文件路径（默认与本脚本同目录的 config.toml）",
     )
     parser.add_argument(
+        "-n",
+        "--n",
         "--name",
+        dest="name",
         default=None,
-        help="覆盖 [experiments].name，指向 runs/<name>/ 下的 checkpoint（其余仍读 config）",
+        metavar="NAME",
+        help="runs/<NAME>/ 的 checkpoint；可用 latest 表示最近一次训练；其余仍读 config",
     )
     parser.add_argument("--split", choices=["train", "val", "test"], default=None)
     parser.add_argument("--device", default=None)

@@ -66,6 +66,35 @@ def resolve_runs_root(exp_dir: Path, cfg: Mapping[str, Any]) -> Path:
     return exp_dir / runs_path
 
 
+def _latest_run_name(runs_root: Path) -> str | None:
+    runs_root = Path(runs_root)
+    if not runs_root.is_dir():
+        return None
+    candidates = [p for p in runs_root.iterdir() if p.is_dir()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime).name
+
+
+def format_available_runs_hint(runs_root: Path, *, limit: int = 15) -> str:
+    runs_root = Path(runs_root)
+    if not runs_root.is_dir():
+        return f"runs 目录不存在: {runs_root}（请先在该实验目录下完成训练）"
+    names = sorted(
+        (p.name for p in runs_root.iterdir() if p.is_dir()),
+        key=lambda n: (runs_root / n).stat().st_mtime,
+        reverse=True,
+    )
+    if not names:
+        return f"runs 目录为空: {runs_root}（请先训练并生成 runs/<name>/）"
+    shown = names[:limit]
+    text = "、".join(shown)
+    if len(names) > limit:
+        text += f" … 共 {len(names)} 个"
+    latest = names[0]
+    return f"已有 run（新→旧）: {text}\n提示: 训练时若未使用 -n，可能已自动递增名称；可用 --name latest 或 --name {latest!r}"
+
+
 def resolve_experiment_run(
     exp_dir: Path,
     cfg: Mapping[str, Any],
@@ -76,10 +105,18 @@ def resolve_experiment_run(
     resolved_name = name or exp_cfg.get("name")
     if not resolved_name:
         raise ValueError("config 缺少 [experiments].name（可用 CLI --name 指定）")
-    name = resolved_name
-    run_dir = resolve_runs_root(exp_dir, cfg) / name
+    runs_root = resolve_runs_root(exp_dir, cfg)
+    if str(resolved_name).strip().lower() == "latest":
+        latest = _latest_run_name(runs_root)
+        if latest is None:
+            raise FileNotFoundError(format_available_runs_hint(runs_root))
+        resolved_name = latest
+    name = str(resolved_name)
+    run_dir = runs_root / name
     if not run_dir.exists():
-        raise FileNotFoundError(f"未找到实验目录: {run_dir}")
+        raise FileNotFoundError(
+            f"未找到实验目录: {run_dir}\n{format_available_runs_hint(runs_root)}"
+        )
     return ExperimentRun(
         name=name,
         run_dir=run_dir,

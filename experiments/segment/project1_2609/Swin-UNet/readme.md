@@ -31,8 +31,9 @@ python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --epochs 1
 # 推理与评估（Dice / IoU / Precision / Recall / FP% / FN% / HD95）
 python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py
 python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
-# 同一 config，仅指定要评估的训练 run 名称
-python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml --name 2026-10-06_001_Swin-UNet_V1
+# 指定 run（须与训练实际生成的 runs/<name>/ 一致；未写 -n 训练时会自动 V2/V3…）
+python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --name 2026-10-06_001_Swin-UNet_V1
+python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --name latest
 python experiments/segment/project1_2609/Swin-UNet/analysis_swin_unet.py --split test
 ```
 
