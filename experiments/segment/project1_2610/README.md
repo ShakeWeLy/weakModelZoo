@@ -13,7 +13,7 @@ project1_2610/
 │   └── models/<model>.toml  模型配置：[model] + [model.params]，可覆盖全局任意键
 ├── trainer/
 │   ├── config.py            配置加载 / 深度合并 / --set 覆盖
-│   ├── recorder.py          run 目录、日志、CSV、checkpoint、summary.json
+│   ├── recorder.py          run 目录、文本日志、TensorBoard、预测 CSV、checkpoint、summary.json
 │   ├── report.py            summary.md / paper_metrics
 │   ├── data.py              weakUnet_Synapse（train_npz + test_vol_h5）
 │   ├── labels.py            标签 0..8（背景 + 8 器官）
@@ -42,7 +42,25 @@ python experiments/segment/project1_2610/train.py -m swin_unet --quick -n _smoke
 # 预测分析（默认 best checkpoint，split 取 test.splits）
 python experiments/segment/project1_2610/analyze.py -m swin_unet -n 2026-10-08_001_Swin-UNet_V1
 python experiments/segment/project1_2610/analyze.py -m swin_unet --split val --checkpoint last --no-vis
+
+# 查看训练曲线（TensorBoard）
+tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_UNet_V1/tensorboard
 ```
+
+### 配置开关
+
+`configs/global.toml` 与 `configs/models/*.toml` 中的布尔键即开关（`true` 开 / `false` 关），每个开关在文件中都有注释。常用开关：
+
+| 开关 | 位置 | 作用 |
+|---|---|---|
+| `augment` | `[dataset]` | 训练集数据增强 |
+| `use_class_weights` | `[train]` | 类别权重（关闭时所有类等权，忽略 `dice_class_weights` / `ce_class_weights`） |
+| `skip_absent_classes` | `[train]` | Dice 是否跳过 batch 中缺失的类 |
+| `guaranteed_sampling` | `[train]` | 保底采样（保证指定类别切片每个 epoch 出现） |
+| `early_stopping` | `[train]` | 早停（关闭后训练满 `num_epochs`，`early_stopping_patience` 仅在开启时生效） |
+| `amp` | `[train]` | 混合精度（仅 CUDA） |
+| `repeat_gray_to_rgb` | `[model]` | 灰度输入是否复制为 3 通道 |
+| `save_predictions` / `save_visualizations` | `[test]` | 是否保存预测掩码 / 可视化 |
 
 - `-n` 指定 run 名：已存在时清空重建（`--no-overwrite` 改为报错）；不指定时使用 `experiments.name`，已占用则自动递增 `_V2`、`_V3`…
 - `analyze` 的 dataset / model 配置来自 run 的 `config.yaml`，`[test]` 段来自当前 configs，改可视化数量等无需重训。
@@ -54,9 +72,8 @@ python experiments/segment/project1_2610/analyze.py -m swin_unet --split val --c
 ```text
 <Model>/runs/<name>/
 ├── config.yaml  train.log  analyze.log
-├── history.csv            epoch, lr, train_loss, train_dice, val_loss, val_dice, seconds
-├── class_metrics.csv      epoch, split, class_id, class_name, dice
-├── summary.json  summary.md  paper_metrics.csv
+├── tensorboard/           标量 loss/*、dice/*、lr、time/*、class_dice/<split>/<类>；config 文本；hparams
+├── summary.json  summary.md  paper_metrics.csv   （summary.json 含 last_epoch 最后一轮指标）
 ├── checkpoints/{best,last}.pth
 └── predictions/<split>/{predictions/*.npy, visualizations/*.png,
                          slice_metrics.csv, organ_slice_metrics.csv, organ_metrics.csv, summary.json}

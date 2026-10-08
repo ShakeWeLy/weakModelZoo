@@ -9,13 +9,13 @@ arch = "vm_unet"
 display_name = "VM-UNet"
 
 [model.params]
-hidden_channels = 32
-depths = [1, 1, 1, 1]
+hidden_channels = 32         # 基础通道数
+depths = [1, 1, 1, 1]        # 编码器各 stage 的 VSS block 数
 depths_decoder = [1, 1, 1, 1]
 patch_size = 4
-d_state = 16
+d_state = 16                 # selective scan 的状态维度
 drop_path_rate = 0.1
-use_checkpoint = true
+use_checkpoint = true        # 开关：梯度检查点（省显存，略慢）
 
 [dataset]
 batch_size = 2

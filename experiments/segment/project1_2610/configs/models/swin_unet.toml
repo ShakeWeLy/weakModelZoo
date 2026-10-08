@@ -7,20 +7,20 @@ description = "Swin-UNet | Dice(0.6) + CE(0.4) + guaranteed_sampling | SGD + pol
 [model]
 arch = "swin_unet"
 display_name = "Swin-UNet"     # 结果目录 project1_2610/Swin-UNet/runs/
-repeat_gray_to_rgb = true      # 输入 3 通道
+repeat_gray_to_rgb = true      # 开关：灰度输入复制为 3 通道（Swin 的 patch embedding 需要 3 通道）
 
 [model.params]
-embed_dim = 96
-depths = [2, 2, 2, 2]
-depths_decoder = [1, 2, 2, 2]
-num_heads = [3, 6, 12, 24]
-window_size = 7
-patch_size = 4
+embed_dim = 96                 # Swin 基础嵌入维度
+depths = [2, 2, 2, 2]          # 编码器各 stage 的 Swin block 数
+depths_decoder = [1, 2, 2, 2]  # 解码器各 stage 的 Swin block 数
+num_heads = [3, 6, 12, 24]     # 各 stage 的注意力头数
+window_size = 7                # 窗口注意力的窗口大小
+patch_size = 4                 # patch 划分大小
 mlp_ratio = 4.0
 drop_rate = 0.0
 attn_drop_rate = 0.0
-drop_path_rate = 0.1
-qkv_bias = true
+drop_path_rate = 0.1           # stochastic depth 比例
+qkv_bias = true                # 开关：QKV 投影是否带偏置
 
 [hyperparameters]
 optimizer = "sgd"
@@ -30,8 +30,8 @@ lr_scheduler = "poly"
 [train]
 dice_loss_weight = 0.6
 ce_loss_weight = 0.4
-guaranteed_sampling = true
-early_stopping_patience = 80
+guaranteed_sampling = true     # 开关：保底采样（保证胆囊、胰腺切片每个 epoch 都出现）
+early_stopping_patience = 80   # 早停耐心值（早停开关沿用 global.toml 的 early_stopping = true）
 
 [quick.dataset]
 batch_size = 2

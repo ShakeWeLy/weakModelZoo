@@ -58,15 +58,19 @@ class DiceCELoss(nn.Module):
         return loss
 
     def describe(self) -> str:
+        weighted = self.dice.class_weights is not None or self.ce.weight is not None
         return (
             f"DiceCE(dice_weight={self.dice_weight}, ce_weight={self.ce_weight}, "
-            f"skip_absent_classes={self.dice.skip_absent_classes})"
+            f"class_weights={'on' if weighted else 'off'}, "
+            f"skip_absent_classes={'on' if self.dice.skip_absent_classes else 'off'})"
         )
 
 
 def build_loss(train_cfg: Mapping[str, Any], num_classes: int) -> DiceCELoss:
-    dice_weights = train_cfg.get("dice_class_weights") or None
-    ce_weights = train_cfg.get("ce_class_weights") or None
+    # 类别权重开关关闭时，忽略 dice_class_weights / ce_class_weights，所有类等权
+    use_class_weights = bool(train_cfg.get("use_class_weights", False))
+    dice_weights = (train_cfg.get("dice_class_weights") or None) if use_class_weights else None
+    ce_weights = (train_cfg.get("ce_class_weights") or None) if use_class_weights else None
     dice_t = torch.tensor(dice_weights, dtype=torch.float32) if dice_weights else None
     if ce_weights:
         if len(ce_weights) != num_classes:

@@ -1,16 +1,16 @@
-"""单次实验的结果记录：目录布局、文件日志、CSV、checkpoint、summary.json。
+"""单次实验的结果记录：目录布局、文件日志、TensorBoard、CSV（预测结果）、checkpoint、summary.json。
 
-目录布局与 project1_2609 保持一致::
+目录布局::
 
     <project>/<Model>/runs/<name>/
     ├── config.yaml          合并后的完整配置
-    ├── train.log
-    ├── history.csv          每 epoch 训练/验证指标
-    ├── class_metrics.csv    逐类别 Dice
+    ├── train.log            训练过程的文本日志（每 epoch 一行摘要）
+    ├── analyze.log          analyze 日志
+    ├── tensorboard/         训练指标（loss / dice / lr / 逐类 Dice / 超参），tensorboard --logdir 查看
     ├── summary.json / summary.md
     ├── paper_metrics.csv    analyze 后生成
     ├── checkpoints/{best,last}.pth
-    └── predictions/<split>/...
+    └── predictions/<split>/...   analyze 的预测掩码、可视化与逐切片 / 逐器官 CSV
 """
 
 from __future__ import annotations
@@ -26,11 +26,7 @@ from typing import Any, Mapping, Sequence
 
 import torch
 import yaml
-
-HISTORY_FIELDS = (
-    "epoch", "lr", "train_loss", "train_dice", "val_loss", "val_dice", "seconds",
-)
-CLASS_METRIC_FIELDS = ("epoch", "split", "class_id", "class_name", "dice")
+from torch.utils.tensorboard import SummaryWriter
 
 
 def unique_run_name(runs_root: Path, base_name: str, *, max_tries: int = 999) -> str:
@@ -49,40 +45,6 @@ def unique_run_name(runs_root: Path, base_name: str, *, max_tries: int = 999) ->
     raise RuntimeError(f"无法在 {runs_root} 下为 {base_name!r} 分配 run 名称")
 
 
-class CsvAppender:
-    """追加写 CSV，每次写入后 flush，训练中断也不丢已写行。"""
-
-    def __init__(self, path: Path, fieldnames: Sequence[str]):
-        self.path = Path(path)
-        self.fieldnames = tuple(fieldnames)
-        write_header = not self.path.exists() or self.path.stat().st_size == 0
-        self._file = self.path.open("a", newline="", encoding="utf-8")
-        self._writer = csv.DictWriter(self._file, fieldnames=self.fieldnames, extrasaction="ignore")
-        if write_header:
-            self._writer.writeheader()
-            self._file.flush()
-
-    def write(self, row: Mapping[str, Any]) -> None:
-        self.write_rows([row])
-
-    def write_rows(self, rows: Sequence[Mapping[str, Any]]) -> None:
-        for row in rows:
-            self._writer.writerow({key: _csv_value(row.get(key)) for key in self.fieldnames})
-        self._file.flush()
-
-    def close(self) -> None:
-        if not self._file.closed:
-            self._file.close()
-
-
-def _csv_value(value: Any) -> Any:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        return round(value, 6)
-    return value
-
-
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str] | None = None,
               *, encoding: str = "utf-8") -> None:
     if fieldnames is None:
@@ -94,6 +56,14 @@ def write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequenc
         writer.writeheader()
         for row in rows:
             writer.writerow({key: _csv_value(row.get(key)) for key in fieldnames})
+
+
+def _csv_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return round(value, 6)
+    return value
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -125,12 +95,10 @@ class RunRecorder:
         self.name = self.run_dir.name
         self.checkpoints_dir = self.run_dir / "checkpoints"
         self.predictions_dir = self.run_dir / "predictions"
+        self.tensorboard_dir = self.run_dir / "tensorboard"
         self.config_path = self.run_dir / "config.yaml"
         self.summary_path = self.run_dir / "summary.json"
-        self.history_path = self.run_dir / "history.csv"
-        self.class_metrics_path = self.run_dir / "class_metrics.csv"
         self.paper_metrics_path = self.run_dir / "paper_metrics.csv"
-        self.log_path = self.run_dir / "train.log"
         self._logger: logging.Logger | None = None
 
     @classmethod
@@ -205,11 +173,9 @@ class RunRecorder:
             self._logger.removeHandler(handler)
         self._logger = None
 
-    def history_writer(self) -> CsvAppender:
-        return CsvAppender(self.history_path, HISTORY_FIELDS)
-
-    def class_metrics_writer(self) -> CsvAppender:
-        return CsvAppender(self.class_metrics_path, CLASS_METRIC_FIELDS)
+    def tensorboard_writer(self) -> SummaryWriter:
+        """训练指标写入 ``runs/<name>/tensorboard/``；使用后需调用 ``close()``。"""
+        return SummaryWriter(log_dir=str(self.tensorboard_dir))
 
     def checkpoint_path(self, kind: str) -> Path:
         return self.checkpoints_dir / f"{kind}.pth"
@@ -226,12 +192,13 @@ class RunRecorder:
         return summary
 
     def finish_training(self, *, status: str, best_val_dice: float | None, best_epoch: int | None,
-                        completed_epochs: int) -> None:
+                        completed_epochs: int, last_metrics: Mapping[str, Any] | None = None) -> None:
         self.update_summary(
             status=status,
             best_val_dice=best_val_dice,
             best_epoch=best_epoch,
             completed_epochs=completed_epochs,
+            last_epoch=dict(last_metrics) if last_metrics else None,
             finished_at=_utc_now(),
         )
         self.write_summary_md()

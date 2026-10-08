@@ -7,11 +7,11 @@ description = "PSC-UNet | Dice + CE | Adam 1e-4 + cosine"
 [model]
 arch = "psc_unet"
 display_name = "PSC-UNet"
-repeat_gray_to_rgb = false
+repeat_gray_to_rgb = false   # 开关：灰度输入是否复制为 3 通道（false = 1 通道输入）
 
 [model.params]
-base_dim = 32
-swin_depths = [1, 1, 1, 1]
+base_dim = 32                # 基础通道数
+swin_depths = [1, 1, 1, 1]   # 各 stage 的 Swin block 数
 dropout = 0.15
 
 [hyperparameters]
@@ -20,7 +20,7 @@ lr_scheduler = "cosine"
 lr_min = 0.000001
 
 [train]
-early_stopping_patience = 80
+early_stopping_patience = 80 # 早停耐心值（早停开关沿用 global.toml 的 early_stopping = true）
 
 [dataset]
 num_workers = 0

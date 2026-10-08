@@ -9,7 +9,7 @@ arch = "unet"
 display_name = "UNet"
 
 [model.params]
-hidden_channels = 64
+hidden_channels = 64         # 基础通道数
 
 [hyperparameters]
 optimizer = "sgd"
@@ -21,9 +21,9 @@ lr_scheduler = "poly"
 
 [train]
 dice_loss_weight = 1.0
-ce_loss_weight = 0.0
-skip_absent_classes = false
-early_stopping_patience = 0
+ce_loss_weight = 0.0         # 设为 0：关闭 CE 项，仅使用 Dice 损失
+skip_absent_classes = false  # 关闭：缺失类也参与 Dice 平均
+early_stopping = false       # 关闭早停，训练满 num_epochs
 
 [quick.model.params]
 hidden_channels = 16

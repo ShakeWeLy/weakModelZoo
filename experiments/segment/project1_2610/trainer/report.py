@@ -83,28 +83,17 @@ def _date_cn(value: str | None) -> str:
     return f"{parsed.year}年{parsed.month}月{parsed.day}日"
 
 
-def _training_tail(recorder: RunRecorder, total_epochs: Any, tail: int = 7) -> list[str]:
-    history = read_csv(recorder.history_path)[-tail:]
-    lines = [
-        f"Epoch [{row['epoch']}/{total_epochs or '?'}] "
-        f"train_loss={fmt_num(row.get('train_loss'))} train_dice={fmt_num(row.get('train_dice'))} "
-        f"val_loss={fmt_num(row.get('val_loss'))} val_dice={fmt_num(row.get('val_dice'))} "
-        f"lr={fmt_num(row.get('lr'), 6)} time={fmt_num(row.get('seconds'), 1)}s"
-        for row in history
-    ]
-    class_rows = read_csv(recorder.class_metrics_path)
-    if not class_rows:
-        return lines
-    last_epoch = max(int(row["epoch"]) for row in class_rows)
-    for split in ("val", "train"):
-        parts = [
-            f"{row['class_name']}={fmt_num(row.get('dice')) or 'N/A'}"
-            for row in class_rows
-            if int(row["epoch"]) == last_epoch and row["split"] == split
-        ]
-        if parts:
-            lines.append(f"Epoch [{last_epoch}] class dice [{split}]: " + ", ".join(parts))
-    return lines
+def _last_epoch_rows(summary: dict[str, Any]) -> list[list[str]]:
+    """summary.json 中记录的最后一个 epoch 的训练 / 验证指标（一行表格）。"""
+    last = summary.get("last_epoch") or {}
+    if not last:
+        return []
+    return [[
+        str(last.get("epoch", "")),
+        fmt_num(last.get("train_loss")), fmt_num(last.get("val_loss")),
+        fmt_num(last.get("train_dice")), fmt_num(last.get("val_dice")),
+        fmt_num(last.get("lr"), 6), fmt_num(last.get("seconds"), 1),
+    ]]
 
 
 def build_summary_markdown(recorder: RunRecorder) -> str:
@@ -129,9 +118,16 @@ def build_summary_markdown(recorder: RunRecorder) -> str:
     lines.extend(f"> {key}: {value}" for key, value in meta if value)
 
     section = 1
-    lines.extend(["", f"### {section} 训练收尾日志", "", "最近若干 epoch 的训练/验证指标，来源 `history.csv`。", ""])
-    tail = _training_tail(recorder, summary.get("total_epochs"))
-    lines.extend(["```bash", *tail, "```", ""] if tail else ["_（无 history.csv 数据）_", ""])
+    lines.extend([
+        "", f"### {section} 训练收尾", "",
+        "训练曲线（loss / dice / lr / 逐类 Dice）与超参记录在 `tensorboard/`，"
+        f"查看命令：`tensorboard --logdir {recorder.tensorboard_dir}`。",
+        "",
+        "最后一个 epoch 的指标（来源 `summary.json` 的 `last_epoch`）：",
+        "",
+        markdown_table(["epoch", "train_loss", "val_loss", "train_dice", "val_dice", "lr", "seconds"],
+                       _last_epoch_rows(summary)),
+    ])
 
     paper_rows = build_paper_metrics_rows(recorder.predictions_dir)
     if paper_rows:

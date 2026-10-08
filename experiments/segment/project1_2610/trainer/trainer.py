@@ -1,4 +1,8 @@
-"""通用分割训练器：所有模型共用同一套训练 / 验证 / checkpoint / 早停流程。"""
+"""通用分割训练器：所有模型共用同一套训练 / 验证 / checkpoint / 早停流程。
+
+训练指标（loss / dice / lr / 逐类 Dice / 超参）写入 TensorBoard（``runs/<name>/tensorboard/``）；
+控制台与 ``train.log`` 只保留精简的每 epoch 摘要。
+"""
 
 from __future__ import annotations
 
@@ -48,6 +52,10 @@ def checkpoint_state(model: nn.Module, cfg: Mapping[str, Any], epoch: int, val_d
     return state
 
 
+def _on_off(flag: bool) -> str:
+    return "on" if flag else "off"
+
+
 class Trainer:
     def __init__(self, cfg: dict[str, Any], recorder: RunRecorder, device: torch.device):
         self.cfg = cfg
@@ -65,9 +73,10 @@ class Trainer:
         self.train_set = build_dataset(cfg, "train", train=True)
         self.val_set = build_dataset(cfg, "val")
         batch_size = int(cfg["dataset"]["batch_size"])
+        self.guaranteed_sampling = bool(self.train_cfg.get("guaranteed_sampling", False))
         self.sampler = (
             build_class_sampler(self.train_set, self.train_cfg, batch_size, self.space.class_name)
-            if self.train_cfg.get("guaranteed_sampling", False) else None
+            if self.guaranteed_sampling else None
         )
         self.train_loader = build_loader(self.train_set, cfg, shuffle=True, sampler=self.sampler, pin_memory=pin)
         self.val_loader = build_loader(self.val_set, cfg, pin_memory=pin)
@@ -82,40 +91,50 @@ class Trainer:
 
         self.class_metrics_every = int(self.train_cfg.get("class_metrics_every", 0))
         self.class_metrics_splits = tuple(self.train_cfg.get("class_metrics_splits", ["val"]))
+
+        # 早停开关：开启时 patience 必须为正数，否则无法判断"未提升"的次数
+        self.early_stopping = bool(self.train_cfg.get("early_stopping", False))
         self.patience = int(self.train_cfg.get("early_stopping_patience", 0))
         self.min_delta = float(self.train_cfg.get("early_stopping_min_delta", 0.0))
+        if self.early_stopping and self.patience <= 0:
+            raise ValueError("early_stopping=true 时需要 early_stopping_patience > 0")
+
+        self.writer = recorder.tensorboard_writer()
 
     def _batches(self, loader: DataLoader):
         return islice(loader, self.limit_batches) if self.limit_batches else loader
 
     def _log_setup(self) -> None:
         cfg, log = self.cfg, self.log
-        model_cfg = cfg["model"]
-        log.info(f"Experiment: {self.recorder.name}")
-        log.info(f"Run dir: {self.recorder.run_dir}")
-        log.info(f"Device: {self.device} | AMP: {self.use_amp}")
+        model_cfg, ds, tr = cfg["model"], cfg["dataset"], self.train_cfg
+        log.info(f"实验 {self.recorder.name} | 模型 {model_cfg['display_name']} ({model_cfg['arch']}) | 设备 {self.device}")
         log.info(
-            f"Data: {cfg['dataset']['data_dir']} | train slices={len(self.train_set)}, "
-            f"val slices={len(self.val_set)} | image_size={cfg['dataset']['image_size']}, "
-            f"batch_size={cfg['dataset']['batch_size']}, augment={cfg['dataset'].get('augment', False)}"
+            f"数据 train={len(self.train_set)} / val={len(self.val_set)} 切片 | "
+            f"image_size={ds['image_size']} batch_size={ds['batch_size']}"
         )
-        log.info(f"Classes: {self.space.num_classes} | metric classes={list(self.space.metric_class_ids)}")
         log.info(
-            f"Model: {model_cfg['display_name']} (arch={model_cfg['arch']}) | "
-            f"in_channels={model_in_channels(model_cfg)} | params={count_parameters(self.model) / 1e6:.2f}M | "
-            f"{model_cfg.get('params', {})}"
+            f"参数量 {count_parameters(self.model) / 1e6:.2f}M | in_channels={model_in_channels(model_cfg)} | "
+            f"classes={self.space.num_classes}"
         )
-        log.info(f"Loss: {self.criterion.describe()}")
+        log.info(f"损失 {self.criterion.describe()}")
         log.info(
-            f"Optimizer: {self.hp.get('optimizer')} lr={self.hp['learning_rate']} "
-            f"wd={self.hp.get('weight_decay', 0)} | scheduler={self.hp.get('lr_scheduler') or 'none'} | "
+            f"优化器 {self.hp.get('optimizer')} lr={self.hp['learning_rate']} "
+            f"wd={self.hp.get('weight_decay', 0)} | 调度 {self.hp.get('lr_scheduler') or 'none'} | "
             f"epochs={self.num_epochs}"
+        )
+        log.info(
+            "开关 | "
+            f"AMP={_on_off(self.use_amp)} | 梯度裁剪={_on_off(self.grad_clip > 0)} | "
+            f"数据增强={_on_off(bool(ds.get('augment', False)))} | "
+            f"类别权重={_on_off(bool(tr.get('use_class_weights', False)))} | "
+            f"跳过缺失类={_on_off(bool(tr.get('skip_absent_classes', True)))} | "
+            f"保底采样={_on_off(self.guaranteed_sampling)} | "
+            f"早停={_on_off(self.early_stopping)}"
+            + (f"(patience={self.patience}, min_delta={self.min_delta})" if self.early_stopping else "")
         )
         if self.sampler is not None:
             pools = ", ".join(f"{n}={s}" for n, s in zip(self.sampler.group_names, self.sampler.pool_sizes))
-            log.info(f"Guaranteed sampling: {pools} | min per group/epoch={self.sampler.min_samples_per_group}")
-        if self.patience > 0:
-            log.info(f"Early stopping: patience={self.patience}, min_delta={self.min_delta}")
+            log.info(f"保底采样池: {pools} | 每组每 epoch 至少 {self.sampler.min_samples_per_group} 个")
         if self.limit_batches:
             log.info(f"[quick] 每个 epoch 仅跑 {self.limit_batches} 个 batch")
 
@@ -147,25 +166,68 @@ class Trainer:
         every = self.class_metrics_every
         return every > 0 and (epoch == 1 or epoch == self.num_epochs or epoch % every == 0)
 
-    def _log_class_dice(self, epoch: int, accumulators: Mapping[str, DiceAccumulator], writer) -> None:
+    def _log_epoch(self, m: Mapping[str, Any]) -> None:
+        self.log.info(
+            f"[E{m['epoch']:03d}/{self.num_epochs}] "
+            f"loss tr {m['train_loss']:.4f} va {m['val_loss']:.4f} | "
+            f"dice tr {m['train_dice']:.4f} va {m['val_dice']:.4f} | "
+            f"lr {m['lr']:.2e} | {m['seconds']:.1f}s"
+        )
+
+    def _write_epoch_scalars(self, m: Mapping[str, Any]) -> None:
+        epoch, w = m["epoch"], self.writer
+        w.add_scalar("loss/train", m["train_loss"], epoch)
+        w.add_scalar("loss/val", m["val_loss"], epoch)
+        w.add_scalar("dice/train", float(m["train_dice"]), epoch)
+        w.add_scalar("dice/val", float(m["val_dice"]), epoch)
+        w.add_scalar("lr", m["lr"], epoch)
+        w.add_scalar("time/epoch_seconds", m["seconds"], epoch)
+
+    def _log_class_dice(self, epoch: int, accumulators: Mapping[str, DiceAccumulator]) -> None:
         for split in self.class_metrics_splits:
             acc = accumulators.get(split)
             if acc is None:
                 continue
-            rows, parts = [], []
+            parts = []
             for class_id, dice in acc.per_class().items():
                 name = self.space.class_name(class_id)
-                rows.append({"epoch": epoch, "split": split, "class_id": class_id, "class_name": name, "dice": dice})
-                parts.append(f"{name}={dice:.4f}" if dice is not None else f"{name}=N/A")
-            writer.write_rows(rows)
-            self.log.info(f"Epoch [{epoch:03d}] class dice [{split}]: " + ", ".join(parts))
+                if dice is None:
+                    parts.append(f"{name}=N/A")
+                    continue
+                self.writer.add_scalar(f"class_dice/{split}/{name}", float(dice), epoch)
+                parts.append(f"{name}={dice:.4f}")
+            self.log.info(f"  class dice {split}: " + " | ".join(parts))
+
+    def _write_config_text(self) -> None:
+        """把合并后的完整配置以文本形式写入 TensorBoard 的 Text 页。"""
+        text = self.recorder.config_path.read_text(encoding="utf-8")
+        self.writer.add_text("config", f"```yaml\n{text}\n```", 0)
+
+    def _write_hparams(self, best_dice: float) -> None:
+        """写入 TensorBoard 的 HParams 页，便于比较不同实验的超参与结果。"""
+        tr, ds = self.train_cfg, self.cfg["dataset"]
+        hparams = {
+            "arch": str(self.cfg["model"]["arch"]),
+            "optimizer": str(self.hp.get("optimizer")),
+            "learning_rate": float(self.hp["learning_rate"]),
+            "lr_scheduler": str(self.hp.get("lr_scheduler") or "none"),
+            "batch_size": int(ds["batch_size"]),
+            "dice_loss_weight": float(tr.get("dice_loss_weight", 1.0)),
+            "ce_loss_weight": float(tr.get("ce_loss_weight", 1.0)),
+            "use_class_weights": bool(tr.get("use_class_weights", False)),
+            "skip_absent_classes": bool(tr.get("skip_absent_classes", True)),
+            "guaranteed_sampling": self.guaranteed_sampling,
+            "early_stopping": self.early_stopping,
+            "amp": self.use_amp,
+        }
+        self.writer.add_hparams(hparams, {"hparam/best_val_dice": float(best_dice)})
 
     def fit(self) -> dict[str, Any]:
         self._log_setup()
+        self._write_config_text()
         best_dice, best_epoch, completed, stale = -1.0, None, 0, 0
         status = "completed"
-        history = self.recorder.history_writer()
-        class_writer = self.recorder.class_metrics_writer()
+        last: dict[str, Any] = {}
         try:
             for epoch in range(1, self.num_epochs + 1):
                 if self.sampler is not None:
@@ -178,32 +240,34 @@ class Trainer:
                 elapsed = time.time() - start
                 completed = epoch
 
-                history.write({
+                last = {
                     "epoch": epoch, "lr": lr,
-                    "train_loss": train_loss, "train_dice": train_dice,
-                    "val_loss": val_loss, "val_dice": val_dice,
+                    "train_loss": train_loss, "train_dice": float(train_dice),
+                    "val_loss": val_loss, "val_dice": float(val_dice),
                     "seconds": round(elapsed, 2),
-                })
-                self.log.info(
-                    f"Epoch [{epoch:03d}/{self.num_epochs}] train_loss={train_loss:.4f} train_dice={train_dice:.4f} "
-                    f"val_loss={val_loss:.4f} val_dice={val_dice:.4f} lr={lr:.6f} time={elapsed:.1f}s"
-                )
+                }
+                self._log_epoch(last)
+                self._write_epoch_scalars(last)
                 if self._should_log_classes(epoch):
-                    self._log_class_dice(epoch, {"train": train_acc, "val": val_acc}, class_writer)
+                    self._log_class_dice(epoch, {"train": train_acc, "val": val_acc})
 
                 state = checkpoint_state(self.model, self.cfg, epoch, val_dice, self.optimizer)
                 self.recorder.save_checkpoint("last", state)
                 if val_dice > best_dice + self.min_delta:
                     best_dice, best_epoch, stale = val_dice, epoch, 0
                     self.recorder.save_checkpoint("best", state)
-                    self.log.info(f"  -> new best val_dice={val_dice:.4f}")
+                    self.log.info(f"  * best val_dice={val_dice:.4f} -> checkpoints/best.pth")
                 else:
                     stale += 1
                 step_scheduler(self.scheduler, val_dice)
+                self.writer.flush()
 
-                if self.patience > 0 and stale >= self.patience:
+                if self.early_stopping and stale >= self.patience:
                     status = "early_stopped"
-                    self.log.info(f"Early stopping at epoch {epoch}: val_dice 连续 {stale} epoch 未提升")
+                    self.log.info(
+                        f"早停: val_dice 连续 {stale} epoch 未提升（patience={self.patience}），"
+                        f"在 epoch {epoch} 停止"
+                    )
                     break
         except KeyboardInterrupt:
             status = "interrupted"
@@ -212,14 +276,18 @@ class Trainer:
             status = "failed"
             raise
         finally:
-            history.close()
-            class_writer.close()
+            if best_epoch is not None:
+                self._write_hparams(best_dice)
+            self.writer.close()
             self.recorder.finish_training(
                 status=status,
                 best_val_dice=best_dice if best_epoch is not None else None,
                 best_epoch=best_epoch,
                 completed_epochs=completed,
+                last_metrics=last or None,
             )
-            self.log.info(f"Status: {status} | best val_dice={best_dice:.4f} (epoch {best_epoch})")
-            self.log.info(f"Best checkpoint: {self.recorder.checkpoint_path('best')}")
+            self.log.info(
+                f"结束 status={status} | best val_dice={best_dice:.4f} @ epoch {best_epoch} | "
+                f"TensorBoard: {self.recorder.tensorboard_dir}"
+            )
         return {"status": status, "best_val_dice": best_dice, "best_epoch": best_epoch}

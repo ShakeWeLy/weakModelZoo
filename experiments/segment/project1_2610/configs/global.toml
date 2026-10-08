@@ -1,75 +1,95 @@
 # 全局配置：所有模型共享。configs/models/<model>.toml 中的同名键会覆盖这里的值。
 # 合并顺序: global → model → global.[quick] → model.[quick]（仅 --quick）→ CLI --epochs / --set
+#
+# 约定：
+#   - 布尔键即"开关"：true = 开启，false = 关闭。
+#   - 数值键若写 0 表示关闭，注释中会明确标出。
 
 [experiments]
-runs_dir = "runs"   # 相对 project1_2610/<model.display_name>/，也可写绝对路径
-date = ""           # 留空 = 运行当天
+runs_dir = "runs"   # 结果目录，相对 project1_2610/<model.display_name>/，也可写绝对路径
+date = ""           # 实验日期（YYYY-MM-DD）；留空 = 运行当天
 
 [dataset]
 # weakUnet_Synapse：data_dir/train_npz/*.npz（训练/验证）+ data_dir/test_vol_h5/*.npy.h5（测试）
 # 标签 0..8 = 背景, spleen, right_kidney, left_kidney, gallbladder, liver, stomach, aorta, pancreas
 data_dir = "data/weakUnet_Synapse"
 list_dir = "data/weakUnet_Synapse_lists"   # train.txt / test_vol.txt
-val_holdout_cases = 2        # 从 train.txt 按病例随机留出的验证病例数
-split_seed = 42
-image_size = 224
+val_holdout_cases = 2        # 从 train.txt 按病例随机留出的验证病例数（非开关）
+split_seed = 42              # 病例划分的随机种子
+image_size = 224             # 网络输入分辨率（需满足所选模型的整除约束）
 batch_size = 8
-num_workers = 1
-augment = true               # 训练集 RandomGenerator：rot90+flip 或 ±20° 旋转
+num_workers = 1              # DataLoader 子进程数；0 = 在主进程中加载
+augment = true               # 开关：训练集数据增强（rot90+flip 或 ±20° 旋转）；验证/测试集不增强
 
 [hyperparameters]
-optimizer = "adam"           # sgd / adam / adamw
+optimizer = "adam"           # 可选: sgd / adam / adamw
 learning_rate = 0.0001
 weight_decay = 0.0001
-momentum = 0.9               # 仅 sgd
+momentum = 0.9               # 仅 sgd 使用
 num_epochs = 300
-lr_scheduler = "none"        # none / step / poly / cosine / plateau
-# lr_min = 1e-6              # cosine / plateau
-# lr_step_size = 50          # step
-# lr_gamma = 0.5             # step
-# lr_poly_power = 0.9        # poly
+lr_scheduler = "none"        # 可选: none（关闭学习率调度）/ step / poly / cosine / plateau
+# lr_min = 1e-6              # cosine / plateau：最小学习率
+# lr_step_size = 50          # step：每隔多少 epoch 衰减一次
+# lr_gamma = 0.5             # step：衰减系数
+# lr_poly_power = 0.9        # poly：幂次
+# lr_cosine_t_max = 300      # cosine：周期（默认 = num_epochs）
+# lr_plateau_factor = 0.5    # plateau：衰减系数
+# lr_plateau_patience = 15   # plateau：容忍的 epoch 数
 
 [train]
-device = "cuda"
-seed = 42
-amp = false
-grad_clip_norm = 0.0         # 0 = 不裁剪
-limit_batches = 0            # >0 时每个 epoch 只跑前 N 个 batch（调试用）
-# best checkpoint 与早停依据这些类别的 val Dice
+device = "cuda"              # 可选: cuda / cpu；CUDA 不可用时自动回退到 cpu
+seed = 42                    # 随机种子
+amp = false                  # 开关：混合精度训练（AMP），仅在 CUDA 上生效
+grad_clip_norm = 0.0         # 梯度裁剪阈值；0 = 关闭
+limit_batches = 0            # 调试：每个 epoch 只跑前 N 个 batch；0 = 关闭（跑完整 epoch）
+
+# 训练指标（loss / dice / lr / 逐类 Dice）统一写入 TensorBoard：runs/<name>/tensorboard/
+class_metrics_every = 10     # 每隔多少 epoch 把逐类 Dice 写入 TensorBoard；0 = 关闭（开启时首末 epoch 必记录）
+class_metrics_splits = ["val", "train"]   # 逐类 Dice 记录的 split 列表
+
+# best checkpoint 与早停依据这些类别的 val Dice（不含背景 0）
 metric_class_ids = [1, 2, 3, 4, 5, 6, 7, 8]
-class_metrics_every = 10
-class_metrics_splits = ["val", "train"]
-# loss = dice_loss_weight * Dice + ce_loss_weight * CE
+
+# 损失 = dice_loss_weight * Dice + ce_loss_weight * CE；某一项设为 0 即关闭该项
 dice_loss_weight = 1.0
 ce_loss_weight = 1.0
-dice_class_weights = []      # 空 = 等权；否则 8 个值（类别 1..8）
-ce_class_weights = []        # 空 = [1.0] + dice_class_weights（或等权）；否则 9 个值
+
+# 开关：类别权重。false = 所有类等权（忽略下面两项）；true = 使用下面的权重
+use_class_weights = false
+dice_class_weights = []      # 仅 use_class_weights=true 时生效：8 个值（类别 1..8）；空 = 等权
+ce_class_weights = []        # 仅 use_class_weights=true 时生效：9 个值（含背景）；空 = [1.0] + dice_class_weights，或等权
+
+# 开关：Dice 只对 batch 中实际出现的类别求平均。true = 缺失类不参与；false = 所有类都参与平均
 skip_absent_classes = true
-# 每 epoch 保证包含指定类别的切片（4=胆囊, 8=胰腺）
+
+# 开关：保底采样。true = 每个 epoch 保证包含各组指定类别的切片
 guaranteed_sampling = false
-guaranteed_class_groups = [[4], [8]]
-min_samples_per_group_per_epoch = 8
-early_stopping_patience = 50
-early_stopping_min_delta = 0.0
+guaranteed_class_groups = [[4], [8]]     # 每组对应一个采样池；4=胆囊, 8=胰腺（标签 0..8）
+min_samples_per_group_per_epoch = 8      # 保底采样时，每组每个 epoch 至少抽取的切片数
+
+# 开关：早停。true = val_dice 连续 patience 个 epoch 未提升则停止；false = 训练满 num_epochs
+early_stopping = true
+early_stopping_patience = 50             # 容忍的连续未提升 epoch 数；early_stopping=true 时必须 > 0
+early_stopping_min_delta = 0.0           # 判定"提升"所需的最小增量
 
 [test]
-device = "cuda"
-checkpoint = "best"          # best / last
-splits = ["train", "val", "test"]
-save_predictions = true
-save_predictions_splits = ["train", "val", "test"]
-save_visualizations = true
-save_visualizations_splits = ["train", "val", "test"]
-visualize_num = 100
-target_slices = []
+device = "cuda"              # 推理设备：cuda / cpu
+checkpoint = "best"          # 使用的 checkpoint：best（最佳 val_dice）/ last（最后一轮）
+splits = ["train", "val", "test"]        # analyze 默认分析的 split 列表
+save_predictions = true      # 开关：保存预测掩码 .npy（总开关，false 时任何 split 都不保存）
+save_predictions_splits = ["train", "val", "test"]       # 保存预测掩码的 split 白名单
+save_visualizations = true   # 开关：保存可视化 PNG（总开关，false 时任何 split 都不保存）
+save_visualizations_splits = ["train", "val", "test"]    # 保存可视化的 split 白名单
+visualize_num = 100          # 每个 split 最多可视化的切片数
+target_slices = []           # 空 = 分析全部切片；否则只分析列出的切片名（如 case0005_slice060）
 
-# --quick：快速冒烟测试
+# --quick：快速冒烟测试，仅在 train.py --quick 时叠加
 [quick.hyperparameters]
 num_epochs = 2
 
 [quick.train]
-limit_batches = 5
-class_metrics_every = 1
+limit_batches = 5           # 每个 epoch 只跑 5 个 batch
+class_metrics_every = 1     # 每个 epoch 都记录逐类 Dice
 
 [quick.test]
 splits = ["val"]

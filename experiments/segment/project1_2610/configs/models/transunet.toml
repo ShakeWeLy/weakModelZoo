@@ -9,13 +9,13 @@ arch = "transunet"
 display_name = "TransUNet"
 
 [model.params]
-hidden_channels = 64
-transformer_depth = 12
-num_heads = 8
+hidden_channels = 64         # 基础通道数
+transformer_depth = 12       # bottleneck Transformer 层数
+num_heads = 8                # 注意力头数
 # ffn_hidden_channels = 4096   # 默认 bottleneck_channels * 4
 
 [train]
-skip_absent_classes = false
+skip_absent_classes = false  # 关闭：缺失类也参与 Dice 平均（覆盖 global.toml 的 true）
 
 [quick.model.params]
 hidden_channels = 16
