@@ -21,3 +21,7 @@ experiments/*/*/*/runs/
 
 # github source
 *-main/
+
+# Model weights (kept locally, not tracked by git)
+Swin-Unet/**/*.pth
+Swin-Unet/**/*.bin
