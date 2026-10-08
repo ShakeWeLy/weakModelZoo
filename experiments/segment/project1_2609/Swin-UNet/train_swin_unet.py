@@ -49,6 +49,10 @@ from src.utils.logger import (
     setup_file_logger,
     update_training_summary,
 )
+from experiments.segment.project1_2609.synapse_dataloader import (
+    build_train_dataloader as build_shared_train_dataloader,
+    build_train_val_datasets,
+)
 
 try:
     import tomllib
@@ -70,7 +74,7 @@ def load_swin_unet_class():
 SwinUNet = load_swin_unet_class()
 
 
-class SynapseSliceDataset(Dataset):
+class LegacySynapseSliceDataset(Dataset):
     def __init__(
         self,
         data_dir: Path,
@@ -210,8 +214,8 @@ class DiceCELoss(nn.Module):
         class_weights: torch.Tensor | None = None,
         ce_class_weights: torch.Tensor | None = None,
         skip_absent_classes: bool = True,
-        dice_weight: float = 1.0,
-        ce_weight: float = 1.0,
+        dice_weight: float = 0.6,
+        ce_weight: float = 0.4,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -346,7 +350,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
-    optimizer_name = hyper_cfg.get("optimizer", "adam").lower()
+    optimizer_name = hyper_cfg.get("optimizer", "sgd").lower()
     lr = float(hyper_cfg["learning_rate"])
     weight_decay = float(hyper_cfg["weight_decay"])
     if optimizer_name == "sgd":
@@ -358,7 +362,11 @@ def build_optimizer(hyper_cfg: dict, model: nn.Module) -> torch.optim.Optimizer:
         )
     if optimizer_name == "adamw":
         return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    return torch.optim.SGD(
+        model.parameters(), lr=lr,
+        momentum=float(hyper_cfg.get("momentum", 0.9)),
+        weight_decay=weight_decay,
+    )
 
 
 DEFAULT_GUARANTEED_CLASS_GROUPS = [[4], [11], [12, 13]]
@@ -411,6 +419,11 @@ def build_lr_scheduler(
             optimizer,
             step_size=int(hyper_cfg.get("lr_step_size", 50)),
             gamma=float(hyper_cfg.get("lr_gamma", 0.5)),
+        )
+    if scheduler_name == "poly":
+        return torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lambda epoch: (1.0 - min(epoch, num_epochs) / num_epochs) ** 0.9,
         )
     if scheduler_name == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -623,7 +636,6 @@ def main():
         model_cfg["depths"] = [1, 1, 1, 1]
         model_cfg["depths_decoder"] = [1, 1, 1, 1]
 
-    data_dir = ROOT / train_cfg.get("data_dir", "data/synapse_processed")
     run = create_experiment_run(
         resolve_runs_root(EXP_DIR, cfg),
         experiment_name,
@@ -684,24 +696,8 @@ def main():
     validate_image_size(image_size, patch_size=patch_size, window_size=window_size)
     augment_config = build_augment_config(dataset_cfg)
 
-    train_set = SynapseSliceDataset(
-        data_dir,
-        "train",
-        image_size,
-        num_classes,
-        repeat_gray_to_rgb=repeat_gray_to_rgb,
-        label_map=label_map,
-        augment_config=augment_config,
-    )
-    val_set = SynapseSliceDataset(
-        data_dir,
-        "val",
-        image_size,
-        num_classes,
-        repeat_gray_to_rgb=repeat_gray_to_rgb,
-        label_map=label_map,
-    )
-    train_loader, train_sampler = build_train_dataloader(
+    train_set, val_set = build_train_val_datasets(dataset_cfg, model_cfg, train_cfg)
+    train_loader, train_sampler = build_shared_train_dataloader(
         train_set,
         batch_size=batch_size,
         num_workers=num_workers,

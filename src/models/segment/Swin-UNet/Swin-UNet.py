@@ -26,11 +26,16 @@ class SwinUNetConfig:
     out_channels: int = 1
     embed_dim: int = 96
     depths: tuple[int, ...] = (2, 2, 2, 2)
-    depths_decoder: tuple[int, ...] = (2, 2, 2, 2)
+    depths_decoder: tuple[int, ...] = (1, 2, 2, 2)
     num_heads: tuple[int, ...] = (3, 6, 12, 24)
     window_size: int = 7
     patch_size: int = 4
     mlp_ratio: float = 4.0
+    drop_rate: float = 0.0
+    attn_drop_rate: float = 0.0
+    drop_path_rate: float = 0.1
+    qkv_bias: bool = True
+    qk_scale: float | None = None
 
 
 def _build_swin_blocks(
@@ -39,6 +44,11 @@ def _build_swin_blocks(
     num_heads: int,
     window_size: int,
     mlp_ratio: float,
+    drop_rate: float,
+    attn_drop_rate: float,
+    drop_path_rates: list[float],
+    qkv_bias: bool,
+    qk_scale: float | None,
 ) -> nn.Sequential:
     blocks = []
     for index in range(depth):
@@ -50,6 +60,11 @@ def _build_swin_blocks(
                 window_size=window_size,
                 shift_size=shift_size,
                 mlp_ratio=mlp_ratio,
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=drop_path_rates[index],
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
             )
         )
     return nn.Sequential(*blocks)
@@ -90,11 +105,17 @@ class SwinUNetEncoderStage(nn.Module):
         num_heads: int,
         window_size: int,
         mlp_ratio: float,
+        drop_rate: float,
+        attn_drop_rate: float,
+        drop_path_rates: list[float],
+        qkv_bias: bool,
+        qk_scale: float | None,
         downsample: bool = True,
     ):
         super().__init__()
         self.blocks = _build_swin_blocks(
-            embed_dim, depth, num_heads, window_size, mlp_ratio
+            embed_dim, depth, num_heads, window_size, mlp_ratio,
+            drop_rate, attn_drop_rate, drop_path_rates, qkv_bias, qk_scale
         )
         self.downsample = PatchMerging(embed_dim) if downsample else None
 
@@ -116,6 +137,11 @@ class SwinUNetDecoderStage(nn.Module):
         num_heads: int,
         window_size: int,
         mlp_ratio: float,
+        drop_rate: float,
+        attn_drop_rate: float,
+        drop_path_rates: list[float],
+        qkv_bias: bool,
+        qk_scale: float | None,
         upsample: bool = True,
         use_skip: bool = True,
     ):
@@ -125,7 +151,8 @@ class SwinUNetDecoderStage(nn.Module):
             self.concat_proj = nn.Linear(in_dim * 2, in_dim)
         self.upsample = PatchExpanding(in_dim) if upsample else None
         self.blocks = _build_swin_blocks(
-            out_dim, depth, num_heads, window_size, mlp_ratio
+            out_dim, depth, num_heads, window_size, mlp_ratio,
+            drop_rate, attn_drop_rate, drop_path_rates, qkv_bias, qk_scale
         )
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor | None = None) -> torch.Tensor:
@@ -152,6 +179,7 @@ class SwinUNet(nn.Module):
             config = SwinUNetConfig(**kwargs)
         elif kwargs:
             config = SwinUNetConfig(**{**config.__dict__, **kwargs})
+        self._init_config = config
 
         depths = tuple(config.depths)
         depths_decoder = tuple(config.depths_decoder)
@@ -166,6 +194,10 @@ class SwinUNet(nn.Module):
 
         dims = [config.embed_dim * (2 ** index) for index in range(self.num_stages)]
         dims_decoder = list(reversed(dims))
+        total_blocks = sum(depths) + sum(depths_decoder)
+        drop_path_rates = iter(torch.linspace(
+            0, config.drop_path_rate, total_blocks
+        ).tolist())
 
         self.patch_embed = SwinPatchEmbed(
             in_channels=config.in_channels,
@@ -182,6 +214,11 @@ class SwinUNet(nn.Module):
                     num_heads=num_heads[stage],
                     window_size=config.window_size,
                     mlp_ratio=config.mlp_ratio,
+                    drop_rate=config.drop_rate,
+                    attn_drop_rate=config.attn_drop_rate,
+                    drop_path_rates=[next(drop_path_rates) for _ in range(depths[stage])],
+                    qkv_bias=config.qkv_bias,
+                    qk_scale=config.qk_scale,
                     downsample=stage < self.num_stages - 1,
                 )
             )
@@ -198,6 +235,11 @@ class SwinUNet(nn.Module):
                     num_heads=num_heads[self.num_stages - 1 - stage],
                     window_size=config.window_size,
                     mlp_ratio=config.mlp_ratio,
+                    drop_rate=config.drop_rate,
+                    attn_drop_rate=config.attn_drop_rate,
+                    drop_path_rates=[next(drop_path_rates) for _ in range(depths_decoder[stage])],
+                    qkv_bias=config.qkv_bias,
+                    qk_scale=config.qk_scale,
                     upsample=stage > 0,
                     use_skip=stage > 0,
                 )
@@ -212,6 +254,17 @@ class SwinUNet(nn.Module):
             config.out_channels,
             kernel_size=1,
         )
+        self.apply(self._init_weights)
+
+    @staticmethod
+    def _init_weights(module: nn.Module) -> None:
+        if isinstance(module, nn.Linear):
+            nn.init.trunc_normal_(module.weight, std=0.02)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+        elif isinstance(module, nn.LayerNorm):
+            nn.init.constant_(module.bias, 0)
+            nn.init.constant_(module.weight, 1.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         skip_list: list[torch.Tensor] = []
@@ -228,6 +281,26 @@ class SwinUNet(nn.Module):
         x = self.final_up(x)
         x = x.permute(0, 3, 1, 2).contiguous()
         return self.final_conv(x)
+
+    def load_from(self, checkpoint_path: str, strict: bool = False) -> None:
+        """加载官方 Swin-Transformer 编码器权重，自动忽略尺寸不匹配的分类头。"""
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
+        converted = {}
+        for key, value in state.items():
+            key = key.removeprefix("module.")
+            if key.startswith("layers."):
+                parts = key.split(".", 2)
+                if len(parts) == 3:
+                    layer_index = 3 - int(parts[1])
+                    key = f"encoders.{layer_index}.blocks.{parts[2]}"
+            if key in self.state_dict() and self.state_dict()[key].shape == value.shape:
+                converted[key] = value
+        missing, unexpected = self.load_state_dict(converted, strict=strict)
+        if missing:
+            print(f"预训练权重未覆盖 {len(missing)} 个参数")
+        if unexpected:
+            print(f"忽略 {len(unexpected)} 个多余参数")
 
 
 if __name__ == "__main__":

@@ -3,12 +3,11 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-from src.module.attention.SelfAttention.multiHeadAttention import MultiHeadAttention
 
 def window_partition(x: torch.Tensor, window_size: int) -> torch.Tensor:
     """[B, H, W, C] -> [B * num_windows, window_size * window_size, C]"""
@@ -49,21 +48,56 @@ def window_reverse(
 class WindowAttention(nn.Module):
     """在局部窗口内做多头自注意力。输入输出均为 [B, H, W, C]。"""
 
-    def __init__(self, embed_dim: int, window_size: int, num_heads: int):
+    def __init__(self, embed_dim: int, window_size: int, num_heads: int,
+                 qkv_bias: bool = True, qk_scale: float | None = None,
+                 attn_drop: float = 0.0, proj_drop: float = 0.0):
         super().__init__()
         self.window_size = window_size
-        self.attention = MultiHeadAttention(embed_dim, num_heads)
+        self.num_heads = num_heads
+        head_dim = embed_dim // num_heads
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim 必须能被 num_heads 整除")
+        self.scale = qk_scale or head_dim ** -0.5
+        self.relative_position_bias_table = nn.Parameter(
+            torch.zeros((2 * window_size - 1) ** 2, num_heads)
+        )
+        coords = torch.stack(torch.meshgrid(
+            torch.arange(window_size), torch.arange(window_size), indexing="ij"
+        ))
+        coords_flatten = torch.flatten(coords, 1)
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()
+        relative_coords[:, :, 0] += window_size - 1
+        relative_coords[:, :, 1] += window_size - 1
+        relative_coords[:, :, 0] *= 2 * window_size - 1
+        self.register_buffer("relative_position_index", relative_coords.sum(-1), persistent=False)
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, height, width, channels = x.shape  # [B, H, W, C] in vittransformer instead of [B, C, H, W] in Conv or [B, N, C] in transformer
-        if height % self.window_size != 0 or width % self.window_size != 0:
-            raise ValueError(
-                f"H/W 必须能被 window_size 整除，当前为 ({height}, {width}), window_size={self.window_size}"
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        batch_size, seq_len, channels = x.shape
+        qkv = self.qkv(x).reshape(
+            batch_size, seq_len, 3, self.num_heads, channels // self.num_heads
+        ).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv
+        attn = (q * self.scale) @ k.transpose(-2, -1)
+        bias = self.relative_position_bias_table[
+            self.relative_position_index.reshape(-1)
+        ].reshape(seq_len, seq_len, self.num_heads).permute(2, 0, 1)
+        attn = attn + bias.unsqueeze(0)
+        if attn_mask is not None:
+            num_windows = attn_mask.shape[0]
+            attn = attn.reshape(batch_size // num_windows, num_windows,
+                                self.num_heads, seq_len, seq_len)
+            attn = (attn + attn_mask.unsqueeze(1).unsqueeze(0)).reshape(
+                -1, self.num_heads, seq_len, seq_len
             )
-
-        windows = window_partition(x, self.window_size)
-        windows = self.attention(windows)
-        return window_reverse(windows, self.window_size, height, width, batch_size)
+        attn = self.attn_drop(F.softmax(attn, dim=-1))
+        out = (attn @ v).transpose(1, 2).reshape(batch_size, seq_len, channels)
+        return self.proj_drop(self.proj(out))
 
 
 def build_shifted_window_attn_mask(
@@ -104,11 +138,12 @@ def build_shifted_window_attn_mask(
 class ShiftedWindowAttention(nn.Module):
     """Swin 的 Shifted Window Attention：先 cyclic shift，窗口内注意力，再 shift 回来。"""
 
-    def __init__(self, embed_dim: int, window_size: int, num_heads: int, shift_size: int | None = None):
+    def __init__(self, embed_dim: int, window_size: int, num_heads: int,
+                 shift_size: int | None = None, **kwargs):
         super().__init__()
         self.window_size = window_size
         self.shift_size = shift_size if shift_size is not None else window_size // 2
-        self.attention = MultiHeadAttention(embed_dim, num_heads)
+        self.attention = WindowAttention(embed_dim, window_size, num_heads, **kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, height, width, _ = x.shape
@@ -237,6 +272,20 @@ class FinalPatchExpanding(nn.Module):
         return self.norm(x)
 
 
+class DropPath(nn.Module):
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+        return x.div(keep_prob) * random_tensor.floor()
+
+
 class SwinTransformerBlock(nn.Module):
     """Swin Transformer Block: LN → W-MSA/SW-MSA → 残差 → LN → MLP → 残差。"""
 
@@ -248,6 +297,10 @@ class SwinTransformerBlock(nn.Module):
         shift_size: int = 0,
         mlp_ratio: float = 4.0,
         drop: float = 0.0,
+        attn_drop: float = 0.0,
+        drop_path: float = 0.0,
+        qkv_bias: bool = True,
+        qk_scale: float | None = None,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
@@ -257,19 +310,24 @@ class SwinTransformerBlock(nn.Module):
                 window_size=window_size,
                 num_heads=num_heads,
                 shift_size=shift_size,
+                qkv_bias=qkv_bias, qk_scale=qk_scale,
+                attn_drop=attn_drop, proj_drop=drop,
             )
         else:
             self.attn = WindowAttention(
                 embed_dim=embed_dim,
                 window_size=window_size,
                 num_heads=num_heads,
+                qkv_bias=qkv_bias, qk_scale=qk_scale,
+                attn_drop=attn_drop, proj_drop=drop,
             )
+        self.drop_path = DropPath(drop_path)
         self.norm2 = nn.LayerNorm(embed_dim)
         self.mlp = Mlp(embed_dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
 
