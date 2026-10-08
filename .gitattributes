@@ -1,0 +1,2 @@
+Swin-Unet/**/*.pth filter=lfs diff=lfs merge=lfs -text
+Swin-Unet/**/*.bin filter=lfs diff=lfs merge=lfs -text
