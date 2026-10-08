@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -90,16 +91,45 @@ def resolve_experiment_run(
     )
 
 
+def ensure_unique_run_name(runs_root: Path, base_name: str, *, max_tries: int = 999) -> str:
+    """在 runs_root 下选取可用目录名；base_name 已占用则递增 ``_V2`` / ``_2`` 后缀。"""
+    runs_root = Path(runs_root)
+    if not (runs_root / base_name).exists():
+        return base_name
+
+    version_match = re.match(r"^(.*_V)(\d+)$", base_name)
+    if version_match:
+        prefix, start = version_match.group(1), int(version_match.group(2))
+        for version in range(start + 1, start + max_tries):
+            candidate = f"{prefix}{version}"
+            if not (runs_root / candidate).exists():
+                return candidate
+    else:
+        for suffix in range(2, max_tries + 1):
+            candidate = f"{base_name}_{suffix}"
+            if not (runs_root / candidate).exists():
+                return candidate
+
+    raise RuntimeError(
+        f"无法在 {runs_root} 下为 {base_name!r} 分配可用 run 名称（已尝试 {max_tries} 次）"
+    )
+
+
 def create_experiment_run(
     runs_root: Path,
     name: str,
     config: Mapping[str, Any],
     config_source: Path | None = None,
+    *,
+    overwrite: bool = False,
 ) -> ExperimentRun:
     runs_root = Path(runs_root)
     run_dir = runs_root / name
     if run_dir.exists():
-        raise FileExistsError(f"实验名称已存在，请更换 [experiments].name: {run_dir}")
+        if overwrite:
+            shutil.rmtree(run_dir)
+        else:
+            raise FileExistsError(f"实验名称已存在，请更换 [experiments].name: {run_dir}")
 
     checkpoints_dir = run_dir / "checkpoints"
     predictions_dir = run_dir / "predictions"

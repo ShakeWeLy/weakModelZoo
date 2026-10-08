@@ -5,6 +5,7 @@
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --epochs 1 --quick
     python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py -n 2026-10-08_002_Swin-UNet_V2
+    python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py -n 2026-10-08_002_Swin-UNet_V2 --no-overwrite
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from src.utils.logger import (
     ClassMetricsLogger,
     CsvMetricsLogger,
     create_experiment_run,
+    ensure_unique_run_name,
     resolve_runs_root,
     setup_file_logger,
     update_training_summary,
@@ -354,7 +356,12 @@ def parse_args() -> argparse.Namespace:
         dest="run_name",
         default=None,
         metavar="NAME",
-        help="覆盖 [experiments].name 创建新 run；其余仍读 config.toml，且不写回 config.toml",
+        help="指定 run 名称（覆盖 config 中的 name）；若 runs/<NAME> 已存在则默认清空重建",
+    )
+    parser.add_argument(
+        "--no-overwrite",
+        action="store_true",
+        help="与 -n 联用：目标 run 已存在时报错，不覆盖",
     )
     return parser.parse_args()
 
@@ -634,7 +641,8 @@ def main():
     train_cfg = cfg.get("train", {})
 
     exp_cfg = cfg.setdefault("experiments", {})
-    if args.run_name is not None:
+    explicit_run_name = args.run_name is not None
+    if explicit_run_name:
         run_name = str(args.run_name).strip()
         if not run_name:
             raise ValueError("--n / --name 不能为空")
@@ -642,6 +650,19 @@ def main():
     experiment_name = exp_cfg.get("name")
     if not experiment_name:
         raise ValueError("config 缺少 [experiments].name（可用 -n / --name 指定）")
+
+    runs_root = resolve_runs_root(EXP_DIR, cfg)
+    if explicit_run_name:
+        if args.no_overwrite and (runs_root / experiment_name).exists():
+            raise FileExistsError(
+                f"run 已存在（加 --no-overwrite 禁止覆盖）: {runs_root / experiment_name}"
+            )
+    else:
+        resolved_name = ensure_unique_run_name(runs_root, experiment_name)
+        if resolved_name != experiment_name:
+            print(f"[experiments] name 已占用，自动创建: {experiment_name} -> {resolved_name}")
+            experiment_name = resolved_name
+            exp_cfg["name"] = resolved_name
 
     num_epochs = int(args.epochs or hyper_cfg["num_epochs"])
     hyper_cfg["num_epochs"] = num_epochs
@@ -651,11 +672,16 @@ def main():
         model_cfg["depths"] = [1, 1, 1, 1]
         model_cfg["depths_decoder"] = [1, 1, 1, 1]
 
+    overwrite_run = explicit_run_name and not args.no_overwrite
+    if overwrite_run and (runs_root / experiment_name).exists():
+        print(f"[experiments] 覆盖已有 run: {runs_root / experiment_name}")
+
     run = create_experiment_run(
-        resolve_runs_root(EXP_DIR, cfg),
+        runs_root,
         experiment_name,
         cfg,
         args.config,
+        overwrite=overwrite_run,
     )
 
     device = torch.device(args.device or train_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu"))

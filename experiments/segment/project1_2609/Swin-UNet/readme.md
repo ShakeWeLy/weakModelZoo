@@ -19,8 +19,11 @@ python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py
 # 指定配置
 python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --config experiments/segment/project1_2609/Swin-UNet/config.toml
 
-# 沿用 config 其余项，仅指定本次 run 名称（-n / --n / --name）
+# 沿用 config，指定 run 名；目录已存在则清空重建（--no-overwrite 可禁止覆盖）
 python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py -n 2026-10-08_002_Swin-UNet_V2
+
+# 不写 -n：若 config 里的 name 已被占用，自动递增为 _V2、_V3… 并创建新 run
+python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py
 
 # 快速试跑 1 个 epoch
 python experiments/segment/project1_2609/Swin-UNet/train_swin_unet.py --epochs 1 --quick
