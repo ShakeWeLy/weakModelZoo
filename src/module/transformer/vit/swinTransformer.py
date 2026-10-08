@@ -135,6 +135,25 @@ def build_shifted_window_attn_mask(
     return attn_mask
 
 
+class WindowAttentionLayer(nn.Module):
+    """对 [B, H, W, C] 做 W-MSA（无 cyclic shift）。"""
+
+    def __init__(self, embed_dim: int, window_size: int, num_heads: int, **kwargs):
+        super().__init__()
+        self.window_size = window_size
+        self.attention = WindowAttention(embed_dim, window_size, num_heads, **kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, height, width, _ = x.shape
+        if height % self.window_size != 0 or width % self.window_size != 0:
+            raise ValueError(
+                f"H/W 必须能被 window_size 整除，当前为 ({height}, {width}), window_size={self.window_size}"
+            )
+        windows = window_partition(x, self.window_size)
+        windows = self.attention(windows, attn_mask=None)
+        return window_reverse(windows, self.window_size, height, width, batch_size)
+
+
 class ShiftedWindowAttention(nn.Module):
     """Swin 的 Shifted Window Attention：先 cyclic shift，窗口内注意力，再 shift 回来。"""
 
@@ -314,7 +333,7 @@ class SwinTransformerBlock(nn.Module):
                 attn_drop=attn_drop, proj_drop=drop,
             )
         else:
-            self.attn = WindowAttention(
+            self.attn = WindowAttentionLayer(
                 embed_dim=embed_dim,
                 window_size=window_size,
                 num_heads=num_heads,
