@@ -97,7 +97,12 @@ class GATAttention(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.heads = heads
-        self.x_w = nn.Linear(in_features=in_features, out_features=out_features)
+        # 每个 head 一份线性变换: 权重 [H, N, D], 偏置 [H, D], 初始化与 nn.Linear 默认一致
+        self.x_w = nn.Parameter(torch.empty(size=(self.heads, self.in_features, self.out_features)))
+        self.x_b = nn.Parameter(torch.empty(size=(self.heads, self.out_features)))
+        bound = 1.0 / (self.in_features ** 0.5)
+        nn.init.uniform_(self.x_w, -bound, bound)
+        nn.init.uniform_(self.x_b, -bound, bound)
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
         self.softmax = nn.Softmax(dim=1)
         # 可训练的注意力向量, 所有节点对与 batch 共享: [heads, 2D] (与节点数 N 无关)
@@ -111,17 +116,18 @@ class GATAttention(nn.Module):
         return: [B, N, out_features]  注意力权重
         '''
         D = self.out_features
-        x = self.x_w(x)  # [B, N, D]
-        lx = F.leaky_relu(x)  # [B, N, D], 与 concat_attention 中先 leaky_relu 再拼接等价
+        # 每个 head 独立的线性变换: [B, N, N] x [H, N, D] -> [B, H, N, D]
+        xw = torch.einsum('bnk,hkd->bhnd', x, self.x_w) + self.x_b[None, :, None, :]
+        lx = F.leaky_relu(xw)  # [B, H, N, D], 与 concat_attention 中先 leaky_relu 再拼接等价
         # 拼接分数 dot([lx_i, lx_j], n_ij) = lx_i·n_ij[:D] + lx_j·n_ij[D:], 避免逐对拼接
-        score_i = torch.einsum('bid,hd->bhi', lx, self.n[:, :D])  # [B, H, N]
-        score_j = torch.einsum('bjd,hd->bhj', lx, self.n[:, D:])  # [B, H, N]
+        score_i = torch.einsum('bhid,hd->bhi', lx, self.n[:, :D])  # [B, H, N]
+        score_j = torch.einsum('bhjd,hd->bhj', lx, self.n[:, D:])  # [B, H, N]
         exp_scores = torch.exp(score_i.unsqueeze(-1) + score_j.unsqueeze(-2))  # [B, H, N, N], [i,j]=score_i[i]+score_j[j]
         # 邻接掩码 + 沿邻居 j 归一化 (与 concat_attention_adjacency_matrix 一致)
         mask = (a != 0).unsqueeze(1).to(exp_scores.dtype)  # [B, 1, N, N]
         exp_scores = exp_scores * mask
         alpha = exp_scores / exp_scores.sum(dim=-1, keepdim=True).clamp_min(1e-12)  # [B, H, N, N]
-        e = torch.matmul(alpha, x.unsqueeze(1))  # [B, H, N, D]
+        e = torch.matmul(alpha, xw)  # [B, H, N, D], 每个 head 用自己的 xw
         e = self.leaky_relu(e)
         return e.mean(dim=1)  # 对 head 取平均, [B, N, D]
 

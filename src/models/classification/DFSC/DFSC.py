@@ -1,4 +1,3 @@
-from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -83,21 +82,20 @@ class SEattention(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self, e: torch.Tensor) -> torch.Tensor:
         '''
-        x: [B, L, D]  L=脑区数/序列长度, D=特征维度
+        SE readout: 节点级嵌入 -> 图级特征 f = E_Φ(P2 σ(P1 ϕmean(E)))
+        e: [B, V, N, D]  V 个视图 (每个视图 N 个节点, D 维嵌入)
+        return: [B, V, D]  每个视图一个图级特征
         '''
-        b, l, d = x.shape
-        # print(x.shape)
-        # 在 L 维上池化, 保留 D: [B, D]
-        atten_score = x.mean(dim=1)
-        # MLP 在 D 上: [B, D]
-        atten = self.mlp(atten_score).view(b, 1, d)   # [B, 1, D]
-        return x * atten + x    
+        z = e.mean(dim=2)        # ϕmean: 对节点取平均 [B, V, D]
+        s = self.mlp(z)          # Φ(P2 σ(P1 z)), 通道级门控 [B, V, D]
+        # 门控只依赖通道, 与节点无关, 所以 mean_n(E ⊙ s) = s ⊙ mean_n(E) = s ⊙ z
+        return s * z            
 
 
 class DFSC(nn.Module):
-    def __init__(self, in_features, features_dim, se_dim=64, gat_heads=1, num_classes=2, transformer_embed_dim=20, transformer_heads=4, mlp_dim=128):
+    def __init__(self, in_features, features_dim, se_dim=64, gat_heads=1, num_classes=2, transformer_embed_dim=20, transformer_heads=1, mlp_dim=128):
         super(DFSC, self).__init__()
         self.num_classes = num_classes
         self.d = features_dim
@@ -132,16 +130,10 @@ class DFSC(nn.Module):
         gat_2_score_matrix = self.gat_2(pers, pers)  # [B*T, N, D], 邻接与特征相同
         gat_2_score_matrix = gat_2_score_matrix.reshape(b, t_pers, n, self.d)  # [B, T, N, D]
 
-        final_x = torch.cat([gat_1_score_matrix, gat_2_score_matrix], dim=1)  # [B, 2T+1, N, D]
-        # print(final_x.shape)
-        # print(t,d,self.d)
-        l = (2*(t-1)+1)*n  # 
-        final_x = final_x.view(b, l, self.d)  # [B, (2T+1)*N, D]
-        self.se.in_features = l
-        final_x = self.se(final_x)  # [B, (2T+1)*N, D]
-        print(final_x.shape)
-        out = self.transformer(final_x)
-        out = out.mean(dim=1)  # [B, D]
+        views = torch.cat([gat_1_score_matrix, gat_2_score_matrix], dim=1)  # [B, 2T+1, N, D], 2T+1 个视图
+        graph_feats = self.se(views)  # SE readout: 每个视图得到一个图级特征 [B, 2T+1, D]
+        fused = self.transformer(graph_feats)  # 单头 Transformer 融合 2T+1 个图级特征 [B, 2T+1, D]
+        out = fused.mean(dim=1)  # [B, D]
         return self.mlp(out)  # [B, C] logits, 训练时配合 nn.CrossEntropyLoss; 推理需概率时对输出做 softmax
 
 
