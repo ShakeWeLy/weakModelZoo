@@ -30,6 +30,25 @@ from src.module.attention.GAT import GATAttention
 #         output_matrix[i] = pearson_matrix
 #     return output_matrix
 
+def filter_topk_global(x: torch.Tensor, ratio: float = 0.3) -> torch.Tensor:
+    """
+    x: [B, T+1, N, N]
+    return: [B, T+1, N, N]，每个 N×N 内部保留全局 top-k，其余置 0
+    """
+    *lead, N1, N2 = x.shape
+    assert N1 == N2, f"最后两维必须相等，实际 {x.shape}"
+
+    total = N1 * N2
+    k = max(1, int(total * ratio))
+
+    flat = x.reshape(*lead, total)            # [B, T+1, N*N]
+    topk_idx = flat.topk(k, dim=-1).indices   # [B, T+1, k]
+
+    mask = torch.zeros_like(flat, dtype=torch.bool)
+    mask.scatter_(-1, topk_idx, True)
+
+    return flat.masked_fill(~mask, 0.0).view(x.shape)
+
 
 def FSC_Personalized(x: torch.Tensor) -> torch.Tensor:
     '''
@@ -94,16 +113,19 @@ class DFSC(nn.Module):
             nn.Linear(mlp_dim, num_classes),
         )
 
-    def forward(self, x, adj):
-        '''
-        x: [B, T+1, N, N]  # B: batch, T: time steps, N: nodes, D: features
-        adj: [B, T+1, N, N]
-        return: [B, C]  # C: classes
-        '''
-        b, t, n, d = x.size()  # t = T+1, d = input features
+    # def forward(self, x, adj):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: [B, T+1, N, N]  B=batch, T+1=时间步数量个, N=节点数, N×N为皮尔逊相关系数矩阵 
+        Returns:
+            [B, C]  C=类别数
+        """
+        b, t, n, _ = x.size()  # t = T+1, d = input features
         gat_1_score_list = []
+        adj = filter_topk_global(x)
         for i in range(t):
-            score = self.gat_1(x[:,i], adj[:,i])  # [B, N, D]
+            score = self.gat_1(x[:,i], adj[:,i])  # [B, N, D]  # adjacency matrix is top 30% filtered feature matrix
             gat_1_score_list.append(score)
         gat_1_score_matrix = torch.stack(gat_1_score_list, dim=1)  # [B, T+1, N, D]
         personalized_score_list = []
@@ -115,7 +137,7 @@ class DFSC(nn.Module):
         gat_2_score_list = []
         for i in range(t-1):  #  -1因为gat_2的输入是T个时间步的特征
             # print(personalized_score_matrix[:,i].shape)
-            score = self.gat_2(personalized_score_matrix[:,i], personalized_score_matrix[:,i])  # [B, N, D]
+            score = self.gat_2(personalized_score_matrix[:,i], personalized_score_matrix[:,i])  # [B, N, D]  # adjacency matrix same as feature matrix
             gat_2_score_list.append(score)
         gat_2_score_matrix = torch.stack(gat_2_score_list, dim=1)  # [B, T, N, D]
 
@@ -133,8 +155,10 @@ class DFSC(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn(size=(2, 3, 10, 10))  # [B, T+1, N, D]
-    adj = torch.randn(size=(2, 3, 10, 10))  # [B, T+1, N, N]
-    dfsc = DFSC(in_features=10, features_dim=20, gat_heads=3)
-    out = dfsc(x, adj)
-    print(out.shape)  # [2, 3, 10, 20]
+    x = torch.randn(size=(2, 3, 10, 10))  # [B, T+1, N, N]
+    # adj = torch.randn(size=(2, 3, 10, 10))  # [B, T+1, N, N]
+    dfsc = DFSC(in_features=10, features_dim=20, gat_heads=3, num_classes=2)
+    # out = dfsc(x, adj)
+    # out = dfsc(x, adj)
+    out = dfsc(x)
+    print(out.shape)  # [2, 2]
