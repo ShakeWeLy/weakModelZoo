@@ -43,9 +43,9 @@ def atten_matrix(x: torch.Tensor, n: torch.Tensor):
 def concat_attention_adjacency_matrix(x: torch.Tensor, adj: torch.Tensor, n: torch.Tensor):
     '''
     计算注意力邻接矩阵, 邻接矩阵过滤
-    x: [N, N]  特征矩阵
-    adj: [N, N]  邻接矩阵
-    n: [N, N, 2N] 可训练分数, NxN个, 每一个是2N(concatenate之后)向量
+    x: [N, D]  特征矩阵
+    adj: [N, D]  邻接矩阵
+    n: [2D] 共享的可训练注意力向量 (前 D 维作用于 x_i, 后 D 维作用于 x_j)
     return: [N, N]  注意力邻接矩阵
     '''
 
@@ -66,7 +66,7 @@ def concat_attention_adjacency_matrix(x: torch.Tensor, adj: torch.Tensor, n: tor
     N = x.size(0)
     # 所有节点对的 exp(分数), [N, N], 第 i 行第 j 列 = 节点 j 对节点 i 的未归一化权重
     exp_scores = torch.stack([
-        torch.stack([concat_attention(x[i], x[j], n[i][j]) for j in range(N)])
+        torch.stack([concat_attention(x[i], x[j], n) for j in range(N)])
         for i in range(N)
     ])
     # 邻接掩码: 非邻居位置置 0
@@ -100,8 +100,8 @@ class GATAttention(nn.Module):
         self.x_w = nn.Linear(in_features=in_features, out_features=out_features)
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
         self.softmax = nn.Softmax(dim=1)
-        # 可训练的注意力参数, 所有 batch 样本共享: [heads, N, N, 2D]
-        self.n = nn.Parameter(torch.empty(size=(self.heads, self.in_features, self.in_features, self.out_features*2)))
+        # 可训练的注意力向量, 所有节点对与 batch 共享: [heads, 2D] (与节点数 N 无关)
+        self.n = nn.Parameter(torch.empty(size=(self.heads, self.out_features*2)))
         nn.init.xavier_uniform_(self.n)
 
     def forward(self, x, a):
@@ -110,17 +110,20 @@ class GATAttention(nn.Module):
         a: [B, N, N]  邻接矩阵
         return: [B, N, out_features]  注意力权重
         '''
-        x = self.x_w(x)  # [B, N, out_features]
-        out = torch.zeros(size=(x.size(0), x.size(1), self.out_features))  # [B, N, out_features]
-        for i in range(x.size(0)):
-            k = torch.zeros(size=(x.size(1), self.out_features))  # [N, out_features]
-            for h in range(self.heads):
-                atten_matrix = concat_attention_adjacency_matrix(x[i], a[i], self.n[h])
-                e = torch.matmul(atten_matrix, x[i])
-                e = self.leaky_relu(e)
-                k = k + e  # 累加每个 head 的输出, [N, out_features]
-            out[i] = k / self.heads  # 对 head 取平均, 保持输出形状不变
-        return out  # [B, N, out_features]
+        D = self.out_features
+        x = self.x_w(x)  # [B, N, D]
+        lx = F.leaky_relu(x)  # [B, N, D], 与 concat_attention 中先 leaky_relu 再拼接等价
+        # 拼接分数 dot([lx_i, lx_j], n_ij) = lx_i·n_ij[:D] + lx_j·n_ij[D:], 避免逐对拼接
+        score_i = torch.einsum('bid,hd->bhi', lx, self.n[:, :D])  # [B, H, N]
+        score_j = torch.einsum('bjd,hd->bhj', lx, self.n[:, D:])  # [B, H, N]
+        exp_scores = torch.exp(score_i.unsqueeze(-1) + score_j.unsqueeze(-2))  # [B, H, N, N], [i,j]=score_i[i]+score_j[j]
+        # 邻接掩码 + 沿邻居 j 归一化 (与 concat_attention_adjacency_matrix 一致)
+        mask = (a != 0).unsqueeze(1).to(exp_scores.dtype)  # [B, 1, N, N]
+        exp_scores = exp_scores * mask
+        alpha = exp_scores / exp_scores.sum(dim=-1, keepdim=True).clamp_min(1e-12)  # [B, H, N, N]
+        e = torch.matmul(alpha, x.unsqueeze(1))  # [B, H, N, D]
+        e = self.leaky_relu(e)
+        return e.mean(dim=1)  # 对 head 取平均, [B, N, D]
 
 # if __name__ == "__main__":
 #     x = torch.randn(size=(10, 10))

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # from src.module.attention.CAM.cam import CAM
-from src.module.transformer import TransformerDecoderBlock
+from src.module.transformer import TransformerEncoderBlock
 from src.module.attention.GAT import GATAttention
 
 
@@ -52,23 +52,22 @@ def filter_topk_global(x: torch.Tensor, ratio: float = 0.3) -> torch.Tensor:
 
 def FSC_Personalized(x: torch.Tensor) -> torch.Tensor:
     '''
-    x: [T+1, N, D]  # DTI + fMRIs(1+T), node, feature
-    return: [T, N, N]  # 每个时间点，DTI节点与fMRI节点的D维特征相关性
+    x: [B, T+1, N, D]  # DTI + fMRIs(1+T), node, feature (batch 维已向量化)
+    return: [B, T, N, N]  # 每个样本、每个时间点，fMRI节点与DTI节点的D维特征相关性
     '''
-    dti = x[0]        # [N, D]
-    fmris = x[1:]     # [T, N, D]
-    T, N, D = fmris.shape
+    dti = x[:, 0]     # [B, N, D]
+    fmris = x[:, 1:]  # [B, T, N, D]
 
     # 中心化
-    dti_c = dti - dti.mean(dim=-1, keepdim=True)          # [N, D]
-    fmri_c = fmris - fmris.mean(dim=-1, keepdim=True)     # [T, N, D]
+    dti_c = dti - dti.mean(dim=-1, keepdim=True)          # [B, N, D]
+    fmri_c = fmris - fmris.mean(dim=-1, keepdim=True)     # [B, T, N, D]
 
     # 归一化
-    dti_n = dti_c / (dti_c.norm(dim=-1, keepdim=True) + 1e-8)      # [N, D]
-    fmri_n = fmri_c / (fmri_c.norm(dim=-1, keepdim=True) + 1e-8)   # [T, N, D]
+    dti_n = dti_c / (dti_c.norm(dim=-1, keepdim=True) + 1e-8)      # [B, N, D]
+    fmri_n = fmri_c / (fmri_c.norm(dim=-1, keepdim=True) + 1e-8)   # [B, T, N, D]
 
-    # 相关: [T, N, D] @ [N, D]^T -> [T, N, N]
-    corr = torch.einsum('tnd,md->tnm', fmri_n, dti_n)
+    # 相关: [B, T, N, D] x [B, N, D] -> [B, T, N, N]
+    corr = torch.einsum('btnd,bmd->btnm', fmri_n, dti_n)
     return corr
 
 
@@ -105,7 +104,7 @@ class DFSC(nn.Module):
         self.gat_1 = GATAttention(in_features=in_features, out_features=features_dim, heads=gat_heads)
         self.gat_2 = GATAttention(in_features=in_features, out_features=features_dim, heads=gat_heads)
         self.se = SEattention(in_features=features_dim, dim=se_dim)
-        self.transformer = TransformerDecoderBlock(embed_dim=transformer_embed_dim, num_heads=transformer_heads, ffn_hidden_channels=features_dim)
+        self.transformer = TransformerEncoderBlock(embed_dim=transformer_embed_dim, num_heads=transformer_heads, ffn_hidden_channels=features_dim)
         # self.fc = nn.Linear(out_features, num_classes)
         self.mlp = nn.Sequential(
             nn.Linear(features_dim, mlp_dim),
@@ -117,29 +116,21 @@ class DFSC(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: [B, T+1, N, N]  B=batch, T+1=时间步数量个, N=节点数, N×N为皮尔逊相关系数矩阵 
+            x: [B, T+1, N, N]  B=batch, T+1=时间步数量个(DTI+fMRIs(T个)), N=节点数, N×N为皮尔逊相关系数矩阵 
         Returns:
             [B, C]  C=类别数
         """
         b, t, n, _ = x.size()  # t = T+1, d = input features
-        gat_1_score_list = []
         adj = filter_topk_global(x)
-        for i in range(t):
-            score = self.gat_1(x[:,i], adj[:,i])  # [B, N, D]  # adjacency matrix is top 30% filtered feature matrix
-            gat_1_score_list.append(score)
-        gat_1_score_matrix = torch.stack(gat_1_score_list, dim=1)  # [B, T+1, N, D]
-        personalized_score_list = []
-        for i in range(b):
-            # TODO: FSC_Personalized 函数需要修改输出情况
-            personalized_score = FSC_Personalized(gat_1_score_matrix[i])  # [T, N, N]
-            personalized_score_list.append(personalized_score)
-        personalized_score_matrix = torch.stack(personalized_score_list, dim=0)  # [B, T, N, N]
-        gat_2_score_list = []
-        for i in range(t-1):  #  -1因为gat_2的输入是T个时间步的特征
-            # print(personalized_score_matrix[:,i].shape)
-            score = self.gat_2(personalized_score_matrix[:,i], personalized_score_matrix[:,i])  # [B, N, D]  # adjacency matrix same as feature matrix
-            gat_2_score_list.append(score)
-        gat_2_score_matrix = torch.stack(gat_2_score_list, dim=1)  # [B, T, N, D]
+        # 将 B 与时间维合并为一个 batch, 一次性计算所有时间步 (权重共享, 与逐步调用等价)
+        gat_1_score_matrix = self.gat_1(x.reshape(b*t, n, n), adj.reshape(b*t, n, n))  # [B*(T+1), N, D]
+        gat_1_score_matrix = gat_1_score_matrix.reshape(b, t, n, self.d)  # [B, T+1, N, D]
+        personalized_score_matrix = FSC_Personalized(gat_1_score_matrix)  # [B, T, N, N]
+        # gat_2 的输入是 T 个时间步的特征, 同样合并 B 与 T 维
+        t_pers = t - 1
+        pers = personalized_score_matrix.reshape(b*t_pers, n, n)
+        gat_2_score_matrix = self.gat_2(pers, pers)  # [B*T, N, D], 邻接与特征相同
+        gat_2_score_matrix = gat_2_score_matrix.reshape(b, t_pers, n, self.d)  # [B, T, N, D]
 
         final_x = torch.cat([gat_1_score_matrix, gat_2_score_matrix], dim=1)  # [B, 2T+1, N, D]
         # print(final_x.shape)
@@ -151,7 +142,7 @@ class DFSC(nn.Module):
         print(final_x.shape)
         out = self.transformer(final_x)
         out = out.mean(dim=1)  # [B, D]
-        return F.softmax(self.mlp(out), dim=1)
+        return self.mlp(out)  # [B, C] logits, 训练时配合 nn.CrossEntropyLoss; 推理需概率时对输出做 softmax
 
 
 if __name__ == "__main__":
