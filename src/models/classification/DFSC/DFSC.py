@@ -88,10 +88,10 @@ class SEattention(nn.Module):
         e: [B, V, N, D]  V 个视图 (每个视图 N 个节点, D 维嵌入)
         return: [B, V, D]  每个视图一个图级特征
         '''
-        z = e.mean(dim=2)        # ϕmean: 对节点取平均 [B, V, D]
+        z = e.mean(dim=2)        # ϕmean: 对节点取平均, 只用于计算门控 [B, V, D]
         s = self.mlp(z)          # Φ(P2 σ(P1 z)), 通道级门控 [B, V, D]
-        # 门控只依赖通道, 与节点无关, 所以 mean_n(E ⊙ s) = s ⊙ mean_n(E) = s ⊙ z
-        return s * z            
+        gated = e * s.unsqueeze(2)  # E ⊙ s, 门控广播到每个节点 [B, V, N, D]
+        return gated.mean(dim=2)    # 读出: 对节点取平均得到图级特征 [B, V, D]            
 
 
 class DFSC(nn.Module):
