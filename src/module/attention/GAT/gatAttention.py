@@ -43,24 +43,38 @@ def atten_matrix(x: torch.Tensor, n: torch.Tensor):
 def concat_attention_adjacency_matrix(x: torch.Tensor, adj: torch.Tensor, n: torch.Tensor):
     '''
     计算注意力邻接矩阵, 邻接矩阵过滤
-    x: [N, D]  特征矩阵
-    adj: [N, D]  邻接矩阵
-    n: [N, N, 2D] 可训练分数, NxN个, 每一个是2D(concatenate之后)向量
+    x: [N, N]  特征矩阵
+    adj: [N, N]  邻接矩阵
+    n: [N, N, 2N] 可训练分数, NxN个, 每一个是2N(concatenate之后)向量
     return: [N, N]  注意力邻接矩阵
     '''
-    concat_matrix = torch.zeros(size=(x.size(0), x.size(0)))
-    atten_matrix = torch.zeros(size=(x.size(0), x.size(0)))  
-    atten_sum = torch.sum(adj, dim=1)
-    for i in range(adj.size(0)):
-        for j in range(adj.size(0)):
-            if adj[i, j] != 0:
-                atten = concat_attention(x[i], x[j], n[i][j])
-                concat_matrix[i, j] = atten
-                atten_sum[j] += atten
-        for j in range(adj.size(0)):
-            if adj[i, j] != 0:
-                atten_matrix[i, j] = concat_matrix[i, j] / atten_sum[j]
-    return atten_matrix
+
+    # concat_matrix = torch.zeros(size=(x.size(0), x.size(0)))
+    # atten_matrix = torch.zeros(size=(x.size(0), x.size(0)))  
+    # atten_sum = torch.sum(adj, dim=1)
+    # for i in range(adj.size(0)):
+    #     for j in range(adj.size(0)):
+    #         if adj[i, j] != 0:
+    #             atten = concat_attention(x[i], x[j], n[i][j])
+    #             concat_matrix[i, j] = atten
+    #             atten_sum[j] += atten
+    #     for j in range(adj.size(0)):
+    #         if adj[i, j] != 0:
+    #             atten_matrix[i, j] = concat_matrix[i, j] / atten_sum[j]
+    # return atten_matrix
+
+    N = x.size(0)
+    # 所有节点对的 exp(分数), [N, N], 第 i 行第 j 列 = 节点 j 对节点 i 的未归一化权重
+    exp_scores = torch.stack([
+        torch.stack([concat_attention(x[i], x[j], n[i][j]) for j in range(N)])
+        for i in range(N)
+    ])
+    # 邻接掩码: 非邻居位置置 0
+    mask = (adj != 0).to(exp_scores.dtype)
+    exp_scores = exp_scores * mask
+    # 对每个节点 i, 沿其邻居 j 归一化 (按行求和); 无邻居的行分母加 eps 避免除 0
+    denom = exp_scores.sum(dim=1, keepdim=True).clamp_min(1e-12)
+    return exp_scores / denom
 
 
 def concat_attention(x_i: torch.Tensor, x_k: torch.Tensor, n: torch.Tensor):
@@ -86,6 +100,9 @@ class GATAttention(nn.Module):
         self.x_w = nn.Linear(in_features=in_features, out_features=out_features)
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
         self.softmax = nn.Softmax(dim=1)
+        # 可训练的注意力参数, 所有 batch 样本共享: [heads, N, N, 2D]
+        self.n = nn.Parameter(torch.empty(size=(self.heads, self.in_features, self.in_features, self.out_features*2)))
+        nn.init.xavier_uniform_(self.n)
 
     def forward(self, x, a):
         '''
@@ -94,17 +111,15 @@ class GATAttention(nn.Module):
         return: [B, N, out_features]  注意力权重
         '''
         x = self.x_w(x)  # [B, N, out_features]
-        self.n = nn.Parameter(torch.zeros(size=(x.size(0), self.heads, self.in_features, self.in_features, self.out_features*2)))  # [B, heads, N, N, 2D]
         out = torch.zeros(size=(x.size(0), x.size(1), self.out_features))  # [B, N, out_features]
         for i in range(x.size(0)):
             k = torch.zeros(size=(x.size(1), self.out_features))  # [N, out_features]
-            for k in range(self.heads):
-                atten_matrix = concat_attention_adjacency_matrix(x[i], a[i], self.n[i][k])
-                atten_matrix = self.softmax(atten_matrix)
+            for h in range(self.heads):
+                atten_matrix = concat_attention_adjacency_matrix(x[i], a[i], self.n[h])
                 e = torch.matmul(atten_matrix, x[i])
                 e = self.leaky_relu(e)
-                k += e  # [N, out_features]
-            out[i] = k
+                k = k + e  # 累加每个 head 的输出, [N, out_features]
+            out[i] = k / self.heads  # 对 head 取平均, 保持输出形状不变
         return out  # [B, N, out_features]
 
 # if __name__ == "__main__":
