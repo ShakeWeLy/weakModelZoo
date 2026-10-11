@@ -35,3 +35,6 @@ TransUNet/**/*.bin
 TransUNet/model_out/
 TransUNet/test_log/
 event*
+
+# Swin-Unet 训练日志（每次训练都会改写，不入库）
+Swin-Unet/model_out/log.txt
