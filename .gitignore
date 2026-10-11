@@ -1,48 +1,68 @@
-# Python bytecode
+# ============================================================
+# Python
+# ============================================================
 __pycache__/
-*.egg-info/
 *.py[cod]
 *$py.class
-*.pyc
-
-# IDE and test cache
-.cursor/*
-.vscode/*
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 
-# Data
+# ============================================================
+# IDE / OS
+# ============================================================
+.cursor/
+.vscode/
+.DS_Store
+
+# ============================================================
+# Data（本地数据集，不入库）
+# ============================================================
 data/*
 
-# experiments
-experiments/*/*/*/outputs/
+# ============================================================
+# Model weights / checkpoints（本地保存，不入库）
+# 各模型的预训练权重说明见对应目录下的 pretrained_ckpt/README.md
+# ============================================================
+*.pth
+*.pt
+*.bin
+*.npz
+checkpoint/
+checkpoints/
+model_out/
+
+# ============================================================
+# Experiment / run outputs（训练与分析产物，不入库）
+# ============================================================
 experiments/*/*/*/runs/
-*.txt
+experiments/*/*/*/outputs/
+test_log/
+predictions/
+outputs/paper_report/
+*.nii
+*.nii.gz
+*.npy
 
-
-# github source
-*-main/
-
-# Model weights (kept locally, not tracked by git)
-Swin-Unet/**/*.pth
-Swin-Unet/**/*.bin
-
-# TransUNet: 预训练权重与训练/测试产物不入库（本地保存，见 TransUNet/pretrained_ckpt/README.md）
-TransUNet/**/*.npz
-TransUNet/**/*.pth
-TransUNet/**/*.bin
-TransUNet/model_out/
-TransUNet/test_log/
-event*
-
-# Swin-Unet 训练日志（每次训练都会改写，不入库）
+# ============================================================
+# Logs（训练日志、tensorboard 事件文件）
+# ============================================================
+*.log
+events.out.tfevents*
+# 每次训练都会改写的 Swin-Unet 日志
 Swin-Unet/model_out/log.txt
 
-# MT-UNet: 训练/测试产物（checkpoint、预测结果、日志）与权重不入库
-MT-UNet/checkpoint/
-MT-UNet/predictions/
-MT-UNet/**/*.pth
-MT-UNet/**/*.log
-# 列表文件 *.txt 需要入库（train.py 依赖），覆盖上面的 *.txt 规则
-!MT-UNet/dataset/lists_Synapse/*.txt
+# ============================================================
+# Text files
+# 默认忽略 *.txt（实验记录、日志等），以下依赖文件例外保留
+# ============================================================
+*.txt
+!**/requirements*.txt
+!**/lists*/**/*.txt
+
+# ============================================================
+# Misc
+# ============================================================
+# github source
+*-main/
