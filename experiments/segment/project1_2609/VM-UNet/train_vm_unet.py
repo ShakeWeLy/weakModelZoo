@@ -32,7 +32,7 @@ except ModuleNotFoundError:
 
 
 def load_vm_unet_class():
-    module_path = ROOT / "src" / "models" / "segment" / "VM-UNet" / "VM-UNet.py"
+    module_path = ROOT / "src" / "models" / "segment" / "VM_UNet" / "VM_UNet.py"
     spec = importlib.util.spec_from_file_location("vm_unet_module", module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"无法加载 VM-UNet 模块: {module_path}")

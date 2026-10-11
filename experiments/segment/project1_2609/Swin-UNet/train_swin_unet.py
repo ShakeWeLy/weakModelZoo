@@ -64,7 +64,7 @@ except ModuleNotFoundError:
 
 
 def load_swin_unet_class():
-    module_path = ROOT / "src" / "models" / "segment" / "Swin-UNet" / "Swin-UNet.py"
+    module_path = ROOT / "src" / "models" / "segment" / "Swin_UNet" / "Swin_UNet.py"
     spec = importlib.util.spec_from_file_location("swin_unet_module", module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"无法加载 Swin-UNet 模块: {module_path}")

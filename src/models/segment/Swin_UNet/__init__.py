@@ -2,7 +2,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-_swin_unet_path = Path(__file__).parent / "Swin-UNet.py"
+_swin_unet_path = Path(__file__).parent / "Swin_UNet.py"
 _swin_unet_spec = importlib.util.spec_from_file_location(
     "src.models.segment.swin_unet.model", _swin_unet_path
 )

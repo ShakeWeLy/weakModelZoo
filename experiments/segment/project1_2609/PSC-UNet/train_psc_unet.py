@@ -58,7 +58,7 @@ except ModuleNotFoundError:
 
 
 def load_psc_unet_class():
-    module_path = ROOT / "src" / "models" / "segment" / "PSC-UNet" / "PSC-UNet.py"
+    module_path = ROOT / "src" / "models" / "segment" / "PSC_UNet" / "PSC_UNet.py"
     spec = importlib.util.spec_from_file_location("psc_unet_module", module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"无法加载 PSC-UNet 模块: {module_path}")

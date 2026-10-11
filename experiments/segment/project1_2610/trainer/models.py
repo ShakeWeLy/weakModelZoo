@@ -55,9 +55,9 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         "src/models/segment/TransUNet/TransUNet.py", "TransUNet",
         inject_image_size=True, validate=_validate_div16,
     ),
-    "swin_unet": ModelSpec("src/models/segment/Swin-UNet/Swin-UNet.py", "SwinUNet", validate=_validate_swin),
-    "psc_unet": ModelSpec("src/models/segment/PSC-UNet/PSC-UNet.py", "PSC_UNet"),
-    "vm_unet": ModelSpec("src/models/segment/VM-UNet/VM-UNet.py", "VMUNet"),
+    "swin_unet": ModelSpec("src/models/segment/Swin_UNet/Swin_UNet.py", "SwinUNet", validate=_validate_swin),
+    "psc_unet": ModelSpec("src/models/segment/PSC_UNet/PSC_UNet.py", "PSC_UNet"),
+    "vm_unet": ModelSpec("src/models/segment/VM_UNet/VM_UNet.py", "VMUNet"),
 }
 
 

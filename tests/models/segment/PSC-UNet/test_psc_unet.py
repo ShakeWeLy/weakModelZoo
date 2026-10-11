@@ -5,7 +5,7 @@ import torch
 
 
 def _load_psc_unet():
-    module_path = Path("src/models/segment/PSC-UNet/PSC-UNet.py")
+    module_path = Path("src/models/segment/PSC_UNet/PSC_UNet.py")
     spec = importlib.util.spec_from_file_location("psc_unet_module", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
