@@ -15,7 +15,11 @@ if str(ROOT) not in sys.path:
 from src.module.attention.SelfAttention.multiHeadAttention import MultiHeadAttention
 
 
-class TransformerDecoderBlock(nn.Module):
+class TransformerEncoderBlock(nn.Module):
+    '''
+    Encoder 式 Transformer 块: 只有自注意力 (Q、K、V 都来自同一输入) + FFN, 无 cross-attention, 无 causal mask.
+    Post-LN 结构: x = LN(x + MHA(x)); x = LN(x + FFN(x))
+    '''
     def __init__(self, embed_dim: int = 32, num_heads: int = 8, ffn_hidden_channels: int = 1024):
         super().__init__()
         self.multiHeadAttention = MultiHeadAttention(embed_dim, num_heads)
@@ -37,10 +41,14 @@ class TransformerDecoderBlock(nn.Module):
 
 if __name__ == "__main__":
     x = torch.randn(2, 196, 768)
-    model = TransformerDecoderBlock(
+    model = TransformerEncoderBlock(
         embed_dim=768,
         num_heads=8,
         ffn_hidden_channels=1024,
     )
     y = model(x)
     print(y.shape)
+
+
+# 兼容旧名称: vit.py、TransUNet.py 等仍在使用 TransformerDecoderBlock
+TransformerDecoderBlock = TransformerEncoderBlock
