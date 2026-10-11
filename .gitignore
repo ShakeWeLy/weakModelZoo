@@ -18,6 +18,8 @@ data/*
 # experiments
 experiments/*/*/*/outputs/
 experiments/*/*/*/runs/
+*.txt
+
 
 # github source
 *-main/
@@ -25,3 +27,11 @@ experiments/*/*/*/runs/
 # Model weights (kept locally, not tracked by git)
 Swin-Unet/**/*.pth
 Swin-Unet/**/*.bin
+
+# TransUNet: 预训练权重与训练/测试产物不入库（本地保存，见 TransUNet/pretrained_ckpt/README.md）
+TransUNet/**/*.npz
+TransUNet/**/*.pth
+TransUNet/**/*.bin
+TransUNet/model_out/
+TransUNet/test_log/
+event*
