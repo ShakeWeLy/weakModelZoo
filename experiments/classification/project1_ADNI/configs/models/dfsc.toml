@@ -1,0 +1,20 @@
+# DFSC 分类模型。未写的键沿用 configs/global.toml。
+# 框架自动注入（无需在此填写）：in_features = 脑区数 N（由数据决定）、num_classes = 2、
+#                              transformer_embed_dim = features_dim（Transformer 输入维度与 D 一致）
+
+[experiments]
+description = "DFSC | ADNI 五折交叉验证 | Adam 1e-5 | batch 12 | 30 epochs | T=6, D=64, K=4"
+
+[model]
+arch = "dfsc"
+display_name = "DFSC"
+
+[model.params]
+features_dim = 64            # D：图嵌入维度（GAT 输出维度）
+gat_heads = 4                # K：GAT 注意力头数
+se_dim = 64                  # SE 注意力中间维度
+transformer_heads = 1        # Transformer 注意力头数（需整除 features_dim）
+mlp_dim = 128                # 分类 MLP 隐层维度
+
+[quick.model.params]
+features_dim = 16

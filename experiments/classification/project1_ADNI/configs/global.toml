@@ -1,0 +1,48 @@
+# 全局配置：所有模型共享。configs/models/<model>.toml 中的同名键会覆盖这里的值。
+# 合并顺序: global → model → global.[quick] → model.[quick]（仅 --quick）→ CLI --epochs / --set
+#
+# 约定：
+#   - 布尔键即"开关"：true = 开启，false = 关闭。
+#   - 数值键若写 0 表示关闭，注释中会明确标出。
+
+[experiments]
+runs_dir = "runs"            # 结果目录，相对 project1_ADNI/<model.display_name>/，也可写绝对路径
+date = ""                    # 实验日期（YYYY-MM-DD）；留空 = 运行当天
+description = ""             # 实验描述（写入 config.yaml / summary.json）
+
+[dataset]
+# 数据：npz 文件，X: [S, T+1, N, N] 皮尔逊相关矩阵（1 个 DTI + T 个 fMRI），y: [S] 0/1 标签
+data_path = ""               # 留空 = 生成 mock 数据（保存到 run 目录下 data/mock_pearson.npz）
+time_segments = 6            # T：时间段数，输入矩阵数 = T+1
+num_folds = 5                # 分层交叉验证折数（每折的留出部分作为 val）
+batch_size = 12
+
+# mock 数据参数（仅 data_path 为空时生效）
+mock_subjects = 200          # 受试者数 S
+mock_nodes = 90              # 脑区数 N
+mock_timepoints = 120        # 生成相关矩阵所用的时间点数
+
+[hyperparameters]
+optimizer = "adam"           # 可选: sgd / adam / adamw
+learning_rate = 0.00001      # 1e-5
+weight_decay = 0.0
+momentum = 0.9               # 仅 sgd 使用
+num_epochs = 30
+lr_scheduler = "none"        # 可选: none（关闭）/ step / poly / cosine
+# lr_min = 1e-7              # cosine：最小学习率
+# lr_step_size = 10          # step：每隔多少 epoch 衰减一次
+# lr_gamma = 0.5             # step：衰减系数
+# lr_poly_power = 0.9        # poly：幂次
+
+[train]
+device = "cuda"              # 可选: cuda / cpu；CUDA 不可用时自动回退到 cpu
+seed = 42                    # 随机种子（数据划分、模型初始化）
+threshold = 0.5              # 正类判定阈值
+tensorboard = true           # 开关：训练曲线写入 tensorboard/fold<k>/
+
+# --quick：快速冒烟测试，仅在 train.py --quick 时叠加
+[quick.dataset]
+mock_subjects = 40
+
+[quick.hyperparameters]
+num_epochs = 2
