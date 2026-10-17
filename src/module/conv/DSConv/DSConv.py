@@ -5,7 +5,7 @@ from ..base import ActArg, NormArg
 from .DepthwiseConv import DepthwiseConv
 from .PointwiseConv import PointwiseConv
 
-class DWConv(nn.Module):
+class DSConv(nn.Module):
     """Depthwise convolution followed by pointwise convolution."""
     def __init__(
         self,
