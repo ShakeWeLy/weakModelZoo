@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 class ASFF(nn.Module):
     """
-    ASFF 自适应空间特征融合 (CVPR 2019, YOLOv3-ASFF)。
+    ASFF 自适应空间特征融合 (Learning Spatial Fusion for Single-Shot Object Detection, arXiv 2019, 1911.09516)。
 
     固定处理 3 个尺度的特征 (与原论文一致), features[0] 分辨率最高, features[2] 分辨率最低。
 

@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class ASPP(nn.Module):
     """
-    ASPP 空洞空间金字塔池化 (DeepLab, TPAMI 2017 / 2018)。
+    ASPP 空洞空间金字塔池化 (DeepLab v2 提出, DeepLab v3 加入图像级池化分支; 本实现为 v3 结构)。
 
     一共 5 个分支:
         branch1: 1x1 卷积
