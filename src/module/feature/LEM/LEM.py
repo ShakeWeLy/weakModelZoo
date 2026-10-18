@@ -23,12 +23,17 @@ class LEM(nn.Module):
         self.conv_x_7 = BaseConv(self.in_channels, self.in_channels, kernel_size=7, stride=1, padding=3)
         self.conv_y_7 = BaseConv(self.in_channels, self.in_channels, kernel_size=7, stride=1, padding=3)
 
-        self.maxpool = nn.AvgPool2d(kernel_size=2, stride=2)
-        self.linear_1 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_3 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_5 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_7 = nn.Linear(self.feature_channels, self.in_channels)
-        self.norm_1 = nn.BatchNorm2d(self.in_channels)
+        # [修复] 之前写的是 self.maxpool = AvgPool2d (名字与实际不符, 且 forward 中从未使用),
+        # forward 中需要的全局平均池化是 self.avgpool, 之前未定义导致报错。
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        # [修复] 之前输入维度用的是 feature_channels, 但 forward 中送入的是 [B, C] 的 alpha (C = in_channels),
+        # 维度对不上, 所以这里改为 in_channels。feature_channels 参数目前未被使用, 仅为保持接口不变。
+        self.linear_1 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_3 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_5 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_7 = nn.Linear(self.in_channels, self.in_channels)
+        # [修复] 之前使用 BatchNorm2d, 但输入是 [B, 4C] 的二维张量, 需要 BatchNorm1d (通道数为 4C)。
+        self.norm_1 = nn.BatchNorm1d(4 * self.in_channels)
 
 
 
@@ -41,7 +46,10 @@ class LEM(nn.Module):
         f_y = f_y.permute(0, 1 ,3, 2) # [B, C, 1, W] -> [B, C, W, 1]
         # [B, C//r, (H+W), 1]
         f_xy = torch.cat([f_x, f_y], dim=2)
-        f_x, f_y = f_xy.split(self.conv(f_xy), [H, W], dim=2) 
+        # [修复] 之前写成 f_xy.split(self.conv(f_xy), [H, W], dim=2), 把卷积结果当成 split 的第一个参数, 报错。
+        # 正确做法: 先卷积得到 [B, C//r, H+W, 1], 再沿 dim=2 按 [H, W] 切分。
+        f_xy = self.conv(f_xy)
+        f_x, f_y = f_xy.split([H, W], dim=2)
         f_y = f_y.permute(0, 1 ,3, 2) # [B, C, W, 1] -> [B, C, 1, W]
         x_x = x * self.conv_x(f_x)  # [B, C, H, W] * [B, C//r, H, 1] -> [B, C, H, W]
         x_y = x * self.conv_y(f_y)  # [B, C, H, W] * [B, C//r, 1, W] -> [B, C, H, W]
