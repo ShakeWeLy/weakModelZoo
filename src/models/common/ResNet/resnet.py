@@ -142,7 +142,15 @@ class ResNet34(nn.Module):
         x = self.layer5(x)
         x = self.avgpool(x)
         return self.fc(x.flatten(1))
-
+        
+    # 写在 ResNet34 里
+    def forward_features(self, x: torch.Tensor) -> list[torch.Tensor]:
+        x = self.layer1(x)
+        feats = []
+        for i in range(2, 6):
+            x = getattr(self, f"layer{i}")(x)
+            feats.append(x)
+        return feats  # [c1, c2, c3, c4]
 
 class Bottleneck(nn.Module):
     expansion = 4
