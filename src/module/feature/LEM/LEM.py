@@ -23,12 +23,12 @@ class LEM(nn.Module):
         self.conv_x_7 = BaseConv(self.in_channels, self.in_channels, kernel_size=7, stride=1, padding=3)
         self.conv_y_7 = BaseConv(self.in_channels, self.in_channels, kernel_size=7, stride=1, padding=3)
 
-        self.maxpool = nn.AvgPool2d(kernel_size=2, stride=2)
-        self.linear_1 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_3 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_5 = nn.Linear(self.feature_channels, self.in_channels)
-        self.linear_7 = nn.Linear(self.feature_channels, self.in_channels)
-        self.norm_1 = nn.BatchNorm2d(self.in_channels)
+        # alpha 来自对 x_all 的 GAP，维度是 in_channels
+        self.linear_1 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_3 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_5 = nn.Linear(self.in_channels, self.in_channels)
+        self.linear_7 = nn.Linear(self.in_channels, self.in_channels)
+        self.norm_1 = nn.BatchNorm2d(self.in_channels * 4)
 
 
 
@@ -41,27 +41,25 @@ class LEM(nn.Module):
         f_y = f_y.permute(0, 1 ,3, 2) # [B, C, 1, W] -> [B, C, W, 1]
         # [B, C//r, (H+W), 1]
         f_xy = torch.cat([f_x, f_y], dim=2)
-        f_x, f_y = f_xy.split(self.conv(f_xy), [H, W], dim=2) 
-        f_y = f_y.permute(0, 1 ,3, 2) # [B, C, W, 1] -> [B, C, 1, W]
-        x_x = x * self.conv_x(f_x)  # [B, C, H, W] * [B, C//r, H, 1] -> [B, C, H, W]
-        x_y = x * self.conv_y(f_y)  # [B, C, H, W] * [B, C//r, 1, W] -> [B, C, H, W]
+        f_x, f_y = self.conv(f_xy).split([H, W], dim=2)
+        f_y = f_y.permute(0, 1, 3, 2)  # [B, C, W, 1] -> [B, C, 1, W]
+        x_x = x * self.conv_x(f_x)  # [B, C, H, W] * [B, C, H, 1]
+        x_y = x * self.conv_y(f_y)  # [B, C, H, W] * [B, C, 1, W]
 
         f_1 = torch.add(self.conv_x_1(x_x), self.conv_y_1(x_y))
         f_3 = torch.add(self.conv_x_3(x_x), self.conv_y_3(x_y))
         f_5 = torch.add(self.conv_x_5(x_x), self.conv_y_5(x_y))
         f_7 = torch.add(self.conv_x_7(x_x), self.conv_y_7(x_y))
-        # x_all = f_1 + f_3 + f_5 + f_7
         x_all = torch.stack([f_1, f_3, f_5, f_7], dim=0).sum(dim=0)
 
-        alpha = self.avgpool(x_all)  # [B, C, H, W] -> [B, C, 1, 1]
-        alpha = alpha.view(B, -1) # [B, C]
+        alpha = F.adaptive_avg_pool2d(x_all, 1).view(B, -1)  # [B, C]
         alpha_1 = F.relu(self.linear_1(alpha))
         alpha_3 = F.relu(self.linear_3(alpha))
         alpha_5 = F.relu(self.linear_5(alpha))
         alpha_7 = F.relu(self.linear_7(alpha))
-        alpha = torch.cat([alpha_1, alpha_3, alpha_5, alpha_7], dim=1)  #[B, 4C]
-        alpha = self.norm_1(alpha)
-        alpha_1, alpha_3, alpha_5, alpha_7 = alpha.chunk(4, dim=1)  #[B, 4C] -> [B, C]
+        alpha = torch.cat([alpha_1, alpha_3, alpha_5, alpha_7], dim=1)  # [B, 4C]
+        alpha = self.norm_1(alpha.view(B, -1, 1, 1)).view(B, -1)
+        alpha_1, alpha_3, alpha_5, alpha_7 = alpha.chunk(4, dim=1)  # [B, C]
         alpha_1 = alpha_1.view(B, C, 1, 1)
         alpha_3 = alpha_3.view(B, C, 1, 1)
         alpha_5 = alpha_5.view(B, C, 1, 1)
