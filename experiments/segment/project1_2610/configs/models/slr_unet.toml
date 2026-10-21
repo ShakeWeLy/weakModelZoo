@@ -1,0 +1,44 @@
+# SLR-UNet：官方 ResNet34（ImageNet 预训练、可训）+ SAM3 neck（预训练、冻结）
+
+[experiments]
+name = "2026-10-21_001_SLR-UNet_V1"
+description = "SLR-UNet | ResNet34 pretrained + SAM3 frozen | Dice + CE | Adam 1e-4"
+
+[model]
+arch = "slr_unet"
+display_name = "SLR-UNet"
+# 官方 ResNet / SAM 均为 3 通道，灰度需复制为 RGB
+repeat_gray_to_rgb = true
+
+[model.params]
+hidden_channels = 64
+resnet_name = "resnet34"
+resnet_pretrained = true          # ImageNet 权重，不冻结，继续训练
+# sam_checkpoint：本地权重路径；留空且 sam_load_from_hf=true 时从 HuggingFace 下载
+sam_checkpoint = ""
+sam_load_from_hf = true
+sam_hf_version = "sam3"
+freeze_sam = true                 # SAM 加载后冻结
+sam_resolution = 1008
+
+[hyperparameters]
+weight_decay = 0.0001
+lr_scheduler = "cosine"
+lr_min = 0.000001
+
+[train]
+# SAM 很大，batch 可按显存下调；可用 --set dataset.batch_size=2
+early_stopping_patience = 50
+
+[dataset]
+batch_size = 2
+num_workers = 0
+
+[quick.model.params]
+hidden_channels = 32
+# 冒烟：不强制下 HF（无权重也能建图；正式训练请开 sam_load_from_hf 或给 sam_checkpoint）
+sam_load_from_hf = false
+resnet_pretrained = true
+
+[quick.dataset]
+batch_size = 1

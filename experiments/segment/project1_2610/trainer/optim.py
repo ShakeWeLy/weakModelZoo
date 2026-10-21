@@ -12,7 +12,10 @@ def build_optimizer(hp: Mapping[str, Any], model: nn.Module) -> torch.optim.Opti
     name = str(hp.get("optimizer", "adam")).lower()
     lr = float(hp["learning_rate"])
     weight_decay = float(hp.get("weight_decay", 0.0))
-    params = model.parameters()
+    # 跳过冻结参数（如 SAM backbone），避免无意义的状态与显存占用
+    params = [p for p in model.parameters() if p.requires_grad]
+    if not params:
+        raise ValueError("没有可训练参数（全部被冻结？）")
     if name == "sgd":
         return torch.optim.SGD(params, lr=lr, momentum=float(hp.get("momentum", 0.9)), weight_decay=weight_decay)
     if name == "adam":
