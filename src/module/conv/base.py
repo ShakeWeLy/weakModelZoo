@@ -58,3 +58,34 @@ class BaseConv(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
+
+class CSconv(BaseConv):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        padding: int | None = None,
+        groups: int = 1,            # 卷积的分组数
+        shuffle_groups: int = 2,    # ChannelShuffle 的分组数
+        bias: bool | None = None,
+        act: ActArg = True,
+        bn: NormArg = True,
+    ) -> None:
+        super().__init__(
+            in_channels, out_channels, kernel_size, stride,
+            padding, groups, bias, act, bn,
+        )
+        if out_channels % shuffle_groups != 0:
+            raise ValueError("out_channels 必须能被 shuffle_groups 整除")
+        self.shuffle_groups = shuffle_groups
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.block(x)
+        N, C, H, W = x.shape
+        g = self.shuffle_groups
+        x = x.view(N, g, C // g, H, W)
+        x = x.transpose(1, 2)
+        x = x.reshape(N, C, H, W)
+        return x
