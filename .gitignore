@@ -35,6 +35,7 @@ checkpoints/
 model_out/
 pretrained_weights/**
 !pretrained_weights/README.md
+!pretrained_weights/download_sam3.py
 
 # ============================================================
 # Experiment / run outputs（训练与分析产物，不入库）
