@@ -18,6 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,6 +38,7 @@ from trainer.labels import LabelSpace  # noqa: E402
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.utils.data.synapse.labels import make_overlay  # noqa: E402
 from src.utils.gradcam import (  # noqa: E402
     GradCAM,
     SegmentationCategoryTarget,
@@ -128,10 +130,11 @@ def main() -> None:
             labels = labels.to(device)
             name = names[0] if isinstance(names, (list, tuple)) else str(names[0])
 
+            with torch.no_grad():
+                pred = model(images).argmax(dim=1)
+
             mask = None
             if args.use_pred_mask or args.use_gt_mask:
-                with torch.no_grad():
-                    pred = model(images).argmax(dim=1)
                 if args.use_gt_mask:
                     mask = (labels == args.class_id).float()
                 else:
@@ -146,13 +149,20 @@ def main() -> None:
             )[0]
 
             rgb = tensor_to_rgb_float(images[0])
-            overlay = overlay_cam_on_image(rgb, grayscale)
+            # make_overlay 使用 Synapse 原始 14 类配色
+            gray_hw = rgb.mean(axis=2)
+            gt_np = space.to_original(labels[0].detach().cpu().numpy().astype(np.int64))
+            pred_np = space.to_original(pred[0].detach().cpu().numpy().astype(np.int64))
+            gt_vis = make_overlay(gray_hw, gt_np)
+            pred_vis = make_overlay(gray_hw, pred_np)
+            cam_vis = overlay_cam_on_image(rgb, grayscale)
             title = f"{name} | {args.layer} | class {args.class_id} ({class_name})"
             path = save_gradcam_figure(
                 out_dir / f"{name}.png",
                 rgb=rgb,
-                cam=grayscale,
-                overlay=overlay,
+                gt_overlay=gt_vis,
+                pred_overlay=pred_vis,
+                cam_overlay=cam_vis,
                 title=title,
             )
             print(f"  saved {path.name}")
