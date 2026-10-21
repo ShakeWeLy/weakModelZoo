@@ -55,6 +55,12 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         "src/models/segment/TransUNet/TransUNet.py", "TransUNet",
         inject_image_size=True, validate=_validate_div16,
     ),
+    "transunet_official": ModelSpec(
+        "src/models/segment/TransUNet_official/TransUNet_official.py",
+        "TransUNetOfficial",
+        inject_image_size=True,
+        validate=_validate_div16,
+    ),
     "swin_unet": ModelSpec("src/models/segment/Swin_UNet/Swin_UNet.py", "SwinUNet", validate=_validate_swin),
     "swin_unet_official": ModelSpec(
         "src/models/segment/Swin_Unet_official/Swin_Unet_official.py",
