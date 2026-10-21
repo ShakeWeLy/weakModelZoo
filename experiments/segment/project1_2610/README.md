@@ -43,6 +43,11 @@ python experiments/segment/project1_2610/train.py -m swin_unet --quick -n _smoke
 python experiments/segment/project1_2610/analyze.py -m swin_unet -n 2026-10-08_001_Swin-UNet_V1
 python experiments/segment/project1_2610/analyze.py -m swin_unet --split val --checkpoint last --no-vis
 
+# Grad-CAM（核心在 src/utils/gradcam.py；分割用类别通道，不是 ClassifierOutputTarget）
+python experiments/segment/project1_2610/gradcam.py \
+  --run-dir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_UNet_V1 \
+  --layer down4.conv --class-id 5 --num 8 --use-pred-mask
+
 # 查看训练曲线（TensorBoard）
 tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_UNet_V1/tensorboard
 ```
