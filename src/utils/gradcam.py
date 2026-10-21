@@ -177,22 +177,27 @@ def save_gradcam_figure(
     path: str | Path,
     *,
     rgb: np.ndarray,
-    cam: np.ndarray,
-    overlay: np.ndarray,
+    gt_overlay: np.ndarray,
+    pred_overlay: np.ndarray,
+    cam_overlay: np.ndarray,
     title: str = "",
 ) -> Path:
+    """四联图：Input | GT | Pred | Grad-CAM overlay（不再单独画纯 CAM 热力图）。"""
     import matplotlib.pyplot as plt
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(rgb if rgb.max() <= 1.5 else rgb / 255.0, cmap="gray")
-    axes[0].set_title("input")
-    axes[1].imshow(cam, cmap="jet")
-    axes[1].set_title("Grad-CAM")
-    axes[2].imshow(overlay)
-    axes[2].set_title("overlay")
-    for ax in axes:
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    img = rgb if rgb.max() <= 1.5 else rgb / 255.0
+    panels = (
+        (img, "input"),
+        (gt_overlay, "GT"),
+        (pred_overlay, "Pred"),
+        (cam_overlay, "Grad-CAM"),
+    )
+    for ax, (panel, name) in zip(axes, panels):
+        ax.imshow(panel)
+        ax.set_title(name)
         ax.axis("off")
     if title:
         fig.suptitle(title)
