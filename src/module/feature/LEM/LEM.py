@@ -28,9 +28,8 @@ class LEM(nn.Module):
         self.linear_3 = nn.Linear(self.in_channels, self.in_channels)
         self.linear_5 = nn.Linear(self.in_channels, self.in_channels)
         self.linear_7 = nn.Linear(self.in_channels, self.in_channels)
-        self.norm_1 = nn.BatchNorm2d(self.in_channels * 4)
-
-
+        # LayerNorm：对 (B, 4C) 向量归一化，batch_size=1 时也能训练（BN 会炸）
+        self.norm_1 = nn.LayerNorm(self.in_channels * 4)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
@@ -58,7 +57,7 @@ class LEM(nn.Module):
         alpha_5 = F.relu(self.linear_5(alpha))
         alpha_7 = F.relu(self.linear_7(alpha))
         alpha = torch.cat([alpha_1, alpha_3, alpha_5, alpha_7], dim=1)  # [B, 4C]
-        alpha = self.norm_1(alpha.view(B, -1, 1, 1)).view(B, -1)
+        alpha = self.norm_1(alpha)
         alpha_1, alpha_3, alpha_5, alpha_7 = alpha.chunk(4, dim=1)  # [B, C]
         alpha_1 = alpha_1.view(B, C, 1, 1)
         alpha_3 = alpha_3.view(B, C, 1, 1)
