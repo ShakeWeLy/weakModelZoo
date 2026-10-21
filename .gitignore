@@ -24,6 +24,7 @@ data/*
 # ============================================================
 # Model weights / checkpoints（本地保存，不入库）
 # 各模型的预训练权重说明见对应目录下的 pretrained_ckpt/README.md
+# 统一权重仓：pretrained_weights/（保留 README）
 # ============================================================
 *.pth
 *.pt
@@ -32,6 +33,8 @@ data/*
 checkpoint/
 checkpoints/
 model_out/
+pretrained_weights/**
+!pretrained_weights/README.md
 
 # ============================================================
 # Experiment / run outputs（训练与分析产物，不入库）

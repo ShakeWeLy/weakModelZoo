@@ -1,8 +1,8 @@
-# SLR-UNet：官方 ResNet34（ImageNet 预训练、可训）+ SAM3 neck（预训练、冻结）
+# SLR-UNet：官方 ResNet34（本地 ImageNet 权重、可训）+ SAM3 neck（本地权重、冻结）
 
 [experiments]
 name = "2026-10-21_001_SLR-UNet_V1"
-description = "SLR-UNet | ResNet34 pretrained + SAM3 frozen | Dice + CE | Adam 1e-4"
+description = "SLR-UNet | ResNet34 local pretrained + SAM3 frozen | Dice + CE | Adam 1e-4"
 
 [model]
 arch = "slr_unet"
@@ -13,12 +13,16 @@ repeat_gray_to_rgb = true
 [model.params]
 hidden_channels = 64
 resnet_name = "resnet34"
-resnet_pretrained = true          # ImageNet 权重，不冻结，继续训练
-# sam_checkpoint：本地权重路径；留空且 sam_load_from_hf=true 时从 HuggingFace 下载
-sam_checkpoint = ""
-sam_load_from_hf = true
+resnet_pretrained = true
+# 相对仓库根目录；见 pretrained_weights/README.md
+resnet_weights = "pretrained_weights/resnet/resnet34-b627a593.pth"
+# ModelScope 下载后的 sam3.pt；若尚未下载可先运行:
+#   python pretrained_weights/download_sam3.py
+# 然后再把下面路径改成打印出的实际路径（通常含 facebook/sam3/）
+sam_checkpoint = "pretrained_weights/sam3/facebook/sam3/sam3.pt"
+sam_load_from_hf = false
 sam_hf_version = "sam3"
-freeze_sam = true                 # SAM 加载后冻结
+freeze_sam = true
 sam_resolution = 1008
 
 [hyperparameters]
@@ -27,7 +31,6 @@ lr_scheduler = "cosine"
 lr_min = 0.000001
 
 [train]
-# SAM 很大，batch 可按显存下调；可用 --set dataset.batch_size=2
 early_stopping_patience = 50
 
 [dataset]
@@ -36,8 +39,8 @@ num_workers = 0
 
 [quick.model.params]
 hidden_channels = 32
-# 冒烟：不强制下 HF（无权重也能建图；正式训练请开 sam_load_from_hf 或给 sam_checkpoint）
-sam_load_from_hf = false
+# 冒烟可不加载 SAM 权重（路径不存在时请临时清空 sam_checkpoint）
+# sam_checkpoint = ""
 resnet_pretrained = true
 
 [quick.dataset]

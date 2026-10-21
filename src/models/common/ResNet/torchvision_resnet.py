@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import torch
@@ -38,12 +39,20 @@ _OUT_CHANNELS: dict[str, tuple[int, int, int, int]] = {
     "resnet152": (256, 512, 1024, 2048),
 }
 
+# 项目内默认权重文件名（相对 pretrained_weights/resnet/）
+_LOCAL_WEIGHT_FILES: dict[str, str] = {
+    "resnet18": "resnet18-f37072fd.pth",
+    "resnet34": "resnet34-b627a593.pth",
+}
+
 
 class TorchvisionResNetEncoder(nn.Module):
     """官方 ResNet stem + layer1..4，``forward_features`` 返回四级特征图。
 
     空间尺寸（输入 H×W）：H/4, H/8, H/16, H/32。
     默认加载 ImageNet 权重且 **不冻结**（可继续训练）。
+
+    ``weights_path`` 优先；否则若 ``pretrained=True`` 则用 torchvision 在线权重。
     """
 
     def __init__(
@@ -52,13 +61,28 @@ class TorchvisionResNetEncoder(nn.Module):
         *,
         pretrained: bool = True,
         in_channels: int = 3,
+        weights_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         if name not in _BUILDERS:
             raise ValueError(f"不支持的 ResNet: {name!r}，可选 {tuple(_BUILDERS)}")
         builder, weights_enum = _BUILDERS[name]
-        weights = weights_enum.DEFAULT if pretrained else None
-        net = builder(weights=weights)
+
+        path = Path(weights_path) if weights_path else None
+        if path is not None and str(path).strip() and path.is_file():
+            net = builder(weights=None)
+            state = torch.load(path, map_location="cpu", weights_only=True)
+            _, unexpected = net.load_state_dict(state, strict=False)
+            if unexpected:
+                raise RuntimeError(f"加载 {path} 出现 unexpected keys: {unexpected[:8]}")
+            # fc 头不参与编码，缺失可忽略
+            loaded = True
+        elif pretrained:
+            net = builder(weights=weights_enum.DEFAULT)
+            loaded = True
+        else:
+            net = builder(weights=None)
+            loaded = False
 
         self.name = name
         self.out_channels = _OUT_CHANNELS[name]
@@ -69,7 +93,7 @@ class TorchvisionResNetEncoder(nn.Module):
         self.layer4 = net.layer4
 
         if in_channels != 3:
-            self._adapt_stem_in_channels(in_channels, pretrained=pretrained)
+            self._adapt_stem_in_channels(in_channels, pretrained=loaded)
 
     def _adapt_stem_in_channels(self, in_channels: int, *, pretrained: bool) -> None:
         old: nn.Conv2d = self.stem[0]  # type: ignore[assignment]

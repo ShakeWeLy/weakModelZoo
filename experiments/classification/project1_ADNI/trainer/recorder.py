@@ -26,7 +26,6 @@ from typing import Any, Mapping, Sequence
 
 import torch
 import yaml
-from torch.utils.tensorboard import SummaryWriter
 
 from .metrics import METRIC_KEYS
 
@@ -124,8 +123,9 @@ class RunRecorder:
             self._logger.removeHandler(handler)
         self._logger = None
 
-    def tensorboard_writer(self, fold: int) -> SummaryWriter:
+    def tensorboard_writer(self, fold: int):
         """每折一个 writer；使用后需调用 ``close()``。"""
+        from torch.utils.tensorboard import SummaryWriter
         return SummaryWriter(log_dir=str(self.tensorboard_dir / f"fold{fold}"))
 
     def save_fold_history(self, fold: int, rows: Sequence[Mapping[str, Any]]) -> Path:

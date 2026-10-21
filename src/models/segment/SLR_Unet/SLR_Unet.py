@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -6,6 +8,20 @@ from src.module.conv import DSConv, BaseConv
 from src.module.feature.LEM import LEM
 from src.module.feature.sam3 import SAM3FeatureExtractor
 from src.models.common.ResNet import TorchvisionResNetEncoder
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _resolve_weight_path(path: str | None) -> str | None:
+    if path is None:
+        return None
+    text = str(path).strip()
+    if not text:
+        return None
+    p = Path(text)
+    if not p.is_absolute():
+        p = _REPO_ROOT / p
+    return str(p.resolve())
 
 
 class UCB_Module(nn.Module):
@@ -90,6 +106,7 @@ class SLR_Unet(nn.Module):
         *,
         resnet_name: str = "resnet34",
         resnet_pretrained: bool = True,
+        resnet_weights: str | None = None,
         sam_checkpoint: str | None = None,
         sam_load_from_hf: bool = False,
         sam_hf_version: str = "sam3",
@@ -97,18 +114,22 @@ class SLR_Unet(nn.Module):
         sam_resolution: int = 1008,
     ):
         super(SLR_Unet, self).__init__()
-        # 官方 ResNet：加载 ImageNet 权重，requires_grad 保持 True（继续训练）
+        resnet_weights = _resolve_weight_path(resnet_weights)
+        # 官方 ResNet：优先本地 weights；requires_grad 保持 True（继续训练）
         self.resnet = TorchvisionResNetEncoder(
             name=resnet_name,  # type: ignore[arg-type]
             pretrained=resnet_pretrained,
             in_channels=in_channels,
+            weights_path=resnet_weights,
         )
         self.resnet_channels = self.resnet.out_channels
         self.sam_channels = SAM3FeatureExtractor.NECK_CHANNELS
         self.fused_channels = tuple(c + self.sam_channels for c in self.resnet_channels)
 
         # SAM3：加载预训练并冻结（不参与反传）
-        ckpt = sam_checkpoint.strip() if isinstance(sam_checkpoint, str) and sam_checkpoint.strip() else None
+        ckpt = _resolve_weight_path(sam_checkpoint)
+        if ckpt is not None and not Path(ckpt).is_file():
+            raise FileNotFoundError(f"SAM 权重不存在: {ckpt}")
         self.transformer = SAM3FeatureExtractor(
             mode="neck",
             checkpoint_path=ckpt,
