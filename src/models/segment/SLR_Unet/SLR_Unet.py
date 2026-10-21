@@ -109,13 +109,14 @@ class SLR_Unet(nn.Module):
         resnet_weights: str | None = None,
         sam_checkpoint: str | None = None,
         sam_load_from_hf: bool = False,
+        sam_auto_download: bool = True,
         sam_hf_version: str = "sam3",
         freeze_sam: bool = True,
         sam_resolution: int = 1008,
     ):
         super(SLR_Unet, self).__init__()
         resnet_weights = _resolve_weight_path(resnet_weights)
-        # 官方 ResNet：优先本地 weights；requires_grad 保持 True（继续训练）
+        # 官方 ResNet：优先本地；缺失且 pretrained=True 时 torchvision 自动下载
         self.resnet = TorchvisionResNetEncoder(
             name=resnet_name,  # type: ignore[arg-type]
             pretrained=resnet_pretrained,
@@ -126,10 +127,27 @@ class SLR_Unet(nn.Module):
         self.sam_channels = SAM3FeatureExtractor.NECK_CHANNELS
         self.fused_channels = tuple(c + self.sam_channels for c in self.resnet_channels)
 
-        # SAM3：加载预训练并冻结（不参与反传）
+        # SAM3：本地优先；缺失则 ModelScope 自动下载（可关），再退回 HF
         ckpt = _resolve_weight_path(sam_checkpoint)
         if ckpt is not None and not Path(ckpt).is_file():
-            raise FileNotFoundError(f"SAM 权重不存在: {ckpt}")
+            if sam_auto_download:
+                import importlib.util
+
+                script = _REPO_ROOT / "pretrained_weights" / "download_sam3.py"
+                spec = importlib.util.spec_from_file_location("slr_download_sam3", script)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"无法加载自动下载脚本: {script}")
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                ckpt = str(mod.ensure_sam3_checkpoint(ckpt))
+            elif sam_load_from_hf:
+                print(f"[pretrained] SAM 本地缺失 {ckpt}，改用 HuggingFace 下载")
+                ckpt = None
+            else:
+                raise FileNotFoundError(
+                    f"SAM 权重不存在: {ckpt}；可设 sam_auto_download=true "
+                    "或运行 python pretrained_weights/download_sam3.py"
+                )
         self.transformer = SAM3FeatureExtractor(
             mode="neck",
             checkpoint_path=ckpt,

@@ -14,13 +14,12 @@ repeat_gray_to_rgb = true
 hidden_channels = 64
 resnet_name = "resnet34"
 resnet_pretrained = true
-# 相对仓库根目录；见 pretrained_weights/README.md
+# 相对仓库根目录；文件不存在时 torchvision 自动下载并尽量落盘到此路径
 resnet_weights = "pretrained_weights/resnet/resnet34-b627a593.pth"
-# ModelScope 下载后的 sam3.pt；若尚未下载可先运行:
-#   python pretrained_weights/download_sam3.py
-# 然后再把下面路径改成打印出的实际路径（通常含 facebook/sam3/）
+# 本地 SAM 路径；不存在且 sam_auto_download=true 时从 ModelScope 自动下载
 sam_checkpoint = "pretrained_weights/sam3/facebook/sam3/sam3.pt"
-sam_load_from_hf = false
+sam_auto_download = true
+sam_load_from_hf = false          # 仅当本地缺失且关闭 auto_download 时的备选
 sam_hf_version = "sam3"
 freeze_sam = true
 sam_resolution = 1008

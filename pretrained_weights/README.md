@@ -49,9 +49,9 @@ model_dir = snapshot_download(
 
 若仓库需授权，先在 ModelScope / Hugging Face 申请访问并登录。
 
-## SLR-UNet
+## SLR-UNet（缺失自动下载）
 
-`experiments/segment/project1_2610/configs/models/slr_unet.toml` 已指向：
+`experiments/segment/project1_2610/configs/models/slr_unet.toml`：
 
-- `resnet_weights = "pretrained_weights/resnet/resnet34-b627a593.pth"`
-- `sam_checkpoint = "pretrained_weights/sam3/facebook/sam3/sam3.pt"`
+- `resnet_weights`：本地没有时，`resnet_pretrained=true` 会走 torchvision 下载并尽量保存到该路径
+- `sam_checkpoint`：本地没有且 `sam_auto_download=true` 时，自动 ModelScope 下载 `facebook/sam3` 的 `sam3.pt`

@@ -68,14 +68,22 @@ class TorchvisionResNetEncoder(nn.Module):
             raise ValueError(f"不支持的 ResNet: {name!r}，可选 {tuple(_BUILDERS)}")
         builder, weights_enum = _BUILDERS[name]
 
-        path = Path(weights_path) if weights_path else None
-        if path is not None and str(path).strip() and path.is_file():
+        path = Path(weights_path) if (weights_path and str(weights_path).strip()) else None
+        if path is not None and not path.is_file() and pretrained:
+            print(f"[pretrained] ResNet 本地权重不存在: {path}，开始下载…")
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                torch.hub.download_url_to_file(weights_enum.DEFAULT.url, str(path), progress=True)
+                print(f"[pretrained] ResNet 已保存到: {path}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[pretrained] 下载到本地失败 ({exc})，改用 torchvision 缓存加载")
+
+        if path is not None and path.is_file():
             net = builder(weights=None)
             state = torch.load(path, map_location="cpu", weights_only=True)
             _, unexpected = net.load_state_dict(state, strict=False)
             if unexpected:
                 raise RuntimeError(f"加载 {path} 出现 unexpected keys: {unexpected[:8]}")
-            # fc 头不参与编码，缺失可忽略
             loaded = True
         elif pretrained:
             net = builder(weights=weights_enum.DEFAULT)
