@@ -56,6 +56,12 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         inject_image_size=True, validate=_validate_div16,
     ),
     "swin_unet": ModelSpec("src/models/segment/Swin_UNet/Swin_UNet.py", "SwinUNet", validate=_validate_swin),
+    "swin_unet_official": ModelSpec(
+        "src/models/segment/Swin_Unet_official/Swin_Unet_official.py",
+        "SwinUNetOfficial",
+        inject_image_size=True,
+        validate=_validate_swin,
+    ),
     "psc_unet": ModelSpec("src/models/segment/PSC_UNet/PSC_UNet.py", "PSC_UNet"),
     "vm_unet": ModelSpec("src/models/segment/VM_UNet/VM_UNet.py", "VMUNet"),
     "slr_unet": ModelSpec(

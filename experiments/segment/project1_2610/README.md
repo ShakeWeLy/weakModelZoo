@@ -70,7 +70,9 @@ tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_
 - `-n` 指定 run 名：已存在时清空重建（`--no-overwrite` 改为报错）；不指定时使用 `experiments.name`，已占用则自动递增 `_V2`、`_V3`…
 - `analyze` 的 dataset / model 配置来自 run 的 `config.yaml`，`[test]` 段来自当前 configs，改可视化数量等无需重训。
 
-可选模型：`unet`、`attn_unet`、`transunet`、`swin_unet`、`psc_unet`、`vm_unet`、`slr_unet`。新增模型：在 `trainer/models.py` 的 `MODEL_REGISTRY` 加一项，再新建对应 toml。
+可选模型：`unet`、`attn_unet`、`transunet`、`swin_unet`、`swin_unet_official`、`psc_unet`、`vm_unet`、`slr_unet`。新增模型：在 `trainer/models.py` 的 `MODEL_REGISTRY` 加一项，再新建对应 toml。
+
+`swin_unet_official`：上游官方 Swin-UNet 骨干 + ImageNet Swin-Tiny 预训练（`pretrained_weights/swin/swin_tiny_patch4_window7_224.pth`）。`repeat_gray_to_rgb=false`（模型 `forward` 内复制为 3 通道）。冒烟可用 `--quick`（自动 `load_pretrained=false`）。
 
 `slr_unet`：官方 torchvision ResNet34（ImageNet 预训练、可训）+ SAM3 neck（预训练、冻结）。需 `repeat_gray_to_rgb=true`；正式训练请在 `configs/models/slr_unet.toml` 设置本地 `sam_checkpoint`，或保持 `sam_load_from_hf=true` 自动下载。
 

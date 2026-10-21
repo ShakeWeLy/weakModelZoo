@@ -1,0 +1,61 @@
+# 官方 Swin-UNet（Hu Cao et al.）：骨干来自上游 SwinTransformerSys，默认加载 ImageNet Swin-Tiny。
+# 超参对齐官方 train.py + swin_tiny_patch4_window7_224_lite.yaml（SGD / poly / Dice0.6+CE0.4）。
+
+[experiments]
+name = "2026-10-21_001_Swin-UNet-Official_V1"
+description = "Swin-UNet official | ImageNet Swin-Tiny pretrained | Dice(0.6)+CE(0.4) | SGD + poly"
+
+[model]
+arch = "swin_unet_official"
+display_name = "Swin-UNet-Official"
+# 官方 Dataset 给 1 通道，模型 forward 内再复制为 3 通道；此处关闭 DataLoader 侧复制
+repeat_gray_to_rgb = false
+
+[model.params]
+# 相对仓库根；默认开启加载。冒烟可 --set model.params.load_pretrained=false
+load_pretrained = true
+pretrained_path = "pretrained_weights/swin/swin_tiny_patch4_window7_224.pth"
+patch_size = 4
+embed_dim = 96
+depths = [2, 2, 2, 2]
+# 上游 yaml 有 DECODER_DEPTHS，但官方构造未传入该参数（解码器用 depths 镜像）；此处仅透传打印
+depths_decoder = [2, 2, 2, 1]
+num_heads = [3, 6, 12, 24]
+window_size = 7
+mlp_ratio = 4.0
+drop_rate = 0.0
+attn_drop_rate = 0.0
+drop_path_rate = 0.2          # 官方 lite yaml
+qkv_bias = true
+ape = false
+patch_norm = true
+use_checkpoint = false
+final_upsample = "expand_first"
+
+[dataset]
+batch_size = 24               # 官方默认；显存不够可 --set dataset.batch_size=8
+
+[hyperparameters]
+optimizer = "sgd"
+learning_rate = 0.05          # 官方 README
+weight_decay = 0.0001
+momentum = 0.9
+num_epochs = 150
+lr_scheduler = "poly"
+lr_poly_power = 0.9
+
+[train]
+dice_loss_weight = 0.6
+ce_loss_weight = 0.4
+guaranteed_sampling = false   # 官方无保底采样
+early_stopping = false        # 官方训满 epoch
+amp = false
+
+[quick.dataset]
+batch_size = 2
+
+[quick.model.params]
+embed_dim = 48
+depths = [1, 1, 1, 1]
+depths_decoder = [1, 1, 1, 1]
+load_pretrained = false       # 冒烟跳过权重，避免小模型 shape 对不上
