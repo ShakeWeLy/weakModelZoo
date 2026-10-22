@@ -1,0 +1,44 @@
+# 官方 TransUNet（Chen et al.）：R50+ViT-B/16，默认加载 ImageNet-21k 预训练。
+# 超参对齐官方 train.py / trainer（SGD / poly / Dice0.5+CE0.5）。
+
+[experiments]
+name = "2026-10-21_001_TransUNet-Official_V1"
+description = "TransUNet official | R50-ViT-B_16 ImageNet-21k | Dice(0.5)+CE(0.5) | SGD + poly"
+
+[model]
+arch = "transunet_official"
+display_name = "TransUNet-Official"
+# 官方 Dataset 给 1 通道，模型 forward 内再复制为 3 通道
+repeat_gray_to_rgb = false
+
+[model.params]
+vit_name = "R50-ViT-B_16"
+vit_patches_size = 16
+n_skip = 3
+load_pretrained = true
+pretrained_path = "pretrained_weights/transunet/R50+ViT-B_16.npz"
+
+[dataset]
+batch_size = 16               # 官方默认 24；本机常见显存用 16，不够可再降
+
+[hyperparameters]
+optimizer = "sgd"
+learning_rate = 0.01          # 官方 train.py base_lr
+weight_decay = 0.0001
+momentum = 0.9
+num_epochs = 150
+lr_scheduler = "poly"
+lr_poly_power = 0.9
+
+[train]
+dice_loss_weight = 0.5
+ce_loss_weight = 0.5
+guaranteed_sampling = false
+early_stopping = false
+amp = false
+
+[quick.dataset]
+batch_size = 1
+
+[quick.model.params]
+load_pretrained = false       # 冒烟跳过 ~440MB npz，加快启动

@@ -11,6 +11,10 @@ pretrained_weights/
 ├── resnet/
 │   ├── resnet18-f37072fd.pth      # 已从本机 torch hub 复制
 │   └── resnet34-b627a593.pth
+├── swin/
+│   └── swin_tiny_patch4_window7_224.pth   # Swin-UNet 官方 ImageNet 预训练
+├── transunet/
+│   └── R50+ViT-B_16.npz                   # TransUNet 官方 ImageNet-21k 预训练
 └── sam3/                          # ModelScope cache_dir
     └── facebook/sam3/
         └── sam3.pt
@@ -48,6 +52,28 @@ model_dir = snapshot_download(
 ```
 
 若仓库需授权，先在 ModelScope / Hugging Face 申请访问并登录。
+
+## Swin-UNet（官方 ImageNet Swin-Tiny）
+
+已从 `Swin-Unet/pretrained_ckpt/swin_tiny_patch4_window7_224.pth` 复制。也可手动：
+
+```bash
+mkdir -p pretrained_weights/swin
+cp /path/to/swin_tiny_patch4_window7_224.pth pretrained_weights/swin/
+```
+
+`experiments/segment/project1_2610/configs/models/swin_unet_official.toml` 默认 `load_pretrained=true`，读取上述路径。
+
+## TransUNet（官方 ImageNet-21k R50+ViT-B/16）
+
+已从 `TransUNet/pretrained_ckpt/R50+ViT-B_16.npz` 复制（约 440 MiB，MD5 `fb93b71c850df1b0390448d4bafc4262`）。也可手动：
+
+```bash
+mkdir -p pretrained_weights/transunet
+cp /path/to/R50+ViT-B_16.npz pretrained_weights/transunet/
+```
+
+`experiments/segment/project1_2610/configs/models/transunet_official.toml` 默认 `load_pretrained=true`，读取上述路径。
 
 ## SLR-UNet（缺失自动下载）
 
