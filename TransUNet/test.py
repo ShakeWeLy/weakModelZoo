@@ -49,7 +49,9 @@ args = parser.parse_args()
 
 def inference(args, model, test_save_path=None):
     db_test = args.Dataset(base_dir=args.volume_path, split="test_vol", list_dir=args.list_dir)
-    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=1)
+    # Windows 下多进程共享内存易触发 error 1455，与 train.py 一致默认 0
+    num_workers = 0 if os.name == 'nt' else 1
+    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=num_workers)
     logging.info("{} test iterations per epoch".format(len(testloader)))
     model.eval()
     metric_list = 0.0
