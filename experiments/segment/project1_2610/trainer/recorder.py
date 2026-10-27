@@ -111,13 +111,21 @@ class RunRecorder:
         overwrite: bool = False,
     ) -> RunRecorder:
         run_dir = Path(runs_root) / name
+        kept_train_log: bytes | None = None
         if run_dir.exists():
             if not overwrite:
                 raise FileExistsError(f"run 已存在: {run_dir}")
+            # 覆盖前先保留旧的 train.log，避免 rmtree 后丢失历史训练记录
+            old_log = run_dir / "train.log"
+            if old_log.is_file():
+                kept_train_log = old_log.read_bytes()
             shutil.rmtree(run_dir)
         recorder = cls(run_dir)
         recorder.checkpoints_dir.mkdir(parents=True)
         recorder.predictions_dir.mkdir()
+        if kept_train_log is not None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            (run_dir / f"train_prev_{stamp}.log").write_bytes(kept_train_log)
         with recorder.config_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(dict(cfg), f, allow_unicode=True, sort_keys=False)
         exp = cfg.get("experiments", {})
