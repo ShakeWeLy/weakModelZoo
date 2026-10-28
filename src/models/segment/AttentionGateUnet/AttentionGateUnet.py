@@ -1,5 +1,3 @@
-from typing import override
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +6,6 @@ from src.models.segment.unet.unet import DoubleConv, UNet
 from src.module.attention.AttentionGate.attentionGate import AttentionGate
 
 
-@override
 class AttentionGateUp(nn.Module):
     def __init__(
         self,
