@@ -25,6 +25,8 @@ project1_2610/
 └── <Model>/runs/<name>/     结果（布局同 2609）
 ```
 
+
+
 ## 配置合并顺序
 
 `global.toml` → `models/<model>.toml` → `global.[quick]` → `model.[quick]`（仅 `--quick`）→ `--epochs` / `--set`
@@ -52,20 +54,24 @@ python experiments/segment/project1_2610/gradcam.py \
 tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_UNet_V1/tensorboard
 ```
 
+
+
 ### 配置开关
 
 `configs/global.toml` 与 `configs/models/*.toml` 中的布尔键即开关（`true` 开 / `false` 关），每个开关在文件中都有注释。常用开关：
 
-| 开关 | 位置 | 作用 |
-|---|---|---|
-| `augment` | `[dataset]` | 训练集数据增强 |
-| `use_class_weights` | `[train]` | 类别权重（关闭时所有类等权，忽略 `dice_class_weights` / `ce_class_weights`） |
-| `skip_absent_classes` | `[train]` | Dice 是否跳过 batch 中缺失的类 |
-| `guaranteed_sampling` | `[train]` | 保底采样（保证指定类别切片每个 epoch 出现） |
-| `early_stopping` | `[train]` | 早停（关闭后训练满 `num_epochs`，`early_stopping_patience` 仅在开启时生效） |
-| `amp` | `[train]` | 混合精度（仅 CUDA） |
-| `repeat_gray_to_rgb` | `[model]` | 灰度输入是否复制为 3 通道 |
-| `save_predictions` / `save_visualizations` | `[test]` | 是否保存预测掩码 / 可视化 |
+
+| 开关                                         | 位置          | 作用                                                          |
+| ------------------------------------------ | ----------- | ----------------------------------------------------------- |
+| `augment`                                  | `[dataset]` | 训练集数据增强                                                     |
+| `use_class_weights`                        | `[train]`   | 类别权重（关闭时所有类等权，忽略 `dice_class_weights` / `ce_class_weights`） |
+| `skip_absent_classes`                      | `[train]`   | Dice 是否跳过 batch 中缺失的类                                       |
+| `guaranteed_sampling`                      | `[train]`   | 保底采样（保证指定类别切片每个 epoch 出现）                                   |
+| `early_stopping`                           | `[train]`   | 早停（关闭后训练满 `num_epochs`，`early_stopping_patience` 仅在开启时生效）   |
+| `amp`                                      | `[train]`   | 混合精度（仅 CUDA）                                                |
+| `repeat_gray_to_rgb`                       | `[model]`   | 灰度输入是否复制为 3 通道                                              |
+| `save_predictions` / `save_visualizations` | `[test]`    | 是否保存预测掩码 / 可视化                                              |
+
 
 - `-n` 指定 run 名：已存在时清空重建（`--no-overwrite` 改为报错）；不指定时使用 `experiments.name`，已占用则自动递增 `_V2`、`_V3`…
 - `analyze` 的 dataset / model 配置来自 run 的 `config.yaml`，`[test]` 段来自当前 configs，改可视化数量等无需重训。
@@ -90,6 +96,8 @@ tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_
                          slice_metrics.csv, organ_slice_metrics.csv, organ_metrics.csv, summary.json}
 ```
 
+
+
 ## 与 2609 的差异
 
 - 训练期 `train_dice` / `val_dice` 为 **epoch 内累积** 的全局 Dice（`metric_class_ids` 上取均值），2609 为逐 batch Dice 的平均，数值不可直接对比；论文指标以 `analyze` 结果为准（两者口径一致）。
@@ -98,3 +106,22 @@ tensorboard --logdir experiments/segment/project1_2610/UNet/runs/2026-10-08_001_
 - analyze 的 train / val 与训练使用同一病例划分（`val_holdout_cases`、`split_seed`）；2609 中 analyze 的 train 包含了验证病例。
 - `guaranteed_class_groups` 使用 0..8 标签（4=胆囊，8=胰腺）。
 - HD95 单位为像素（224×224 分辨率）。
+
+
+
+# 参考数值范围
+
+| 方法 | Dice (%) | HD95 | 主动脉(%) | 胆囊(%) | 左肾脏(%) | 右肾脏(%) | 肝脏(%) | 胰腺(%) | 脾脏(%) | 胃(%) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| U-Net[9] | 70.11 | 44.69 | 84.00 | 56.70 | 72.41 | 62.64 | 86.98 | 48.73 | 81.48 | 67.96 |
+| AttnUNet[42] | 71.7 | 34.47 | 82.61 | 61.94 | 76.07 | 70.42 | 87.54 | 46.7 | 80.67 | 67.66 |
+| TransUNet[14] | 77.48 | 31.69 | 87.23 | 63.13 | 81.87 | 77.02 | 94.08 | 55.86 | 85.08 | 75.62 |
+| SwinUNet[46] | 79.13 | 21.55 | 85.47 | 66.53 | 83.28 | 79.61 | 94.29 | 56.58 | 90.66 | 76.60 |
+| MT-Unet[61] | 78.59 | 26.59 | 87.92 | 64.99 | 81.47 | 77.29 | 93.06 | 59.46 | 87.75 | 76.81 |
+| VM-UNet[67] | 81.08 | 19.21 | 86.40 | 69.41 | 86.16 | 82.76 | 94.17 | 58.80 | 89.51 | 81.40 |
+| PVT-CASCADE[80] | 81.06 | 20.23 | 83.01 | 70.59 | 82.23 | 80.37 | 94.08 | 64.43 | 90.1 | 83.69 |
+| TransCASCADE[83] | 82.68 | 17.34 | 86.63 | 68.48 | 87.66 | 84.56 | 94.43 | 65.33 | 90.79 | 83.52 |
+| PAG-TransYnet[69] | 83.43 | 15.82 | 89.67 | 68.89 | 86.74 | 84.88 | 95.87 | 68.75 | 92.01 | 80.66 |
+| PVT-EMCAD[70] | 83.63 | 15.68 | 88.14 | 68.87 | 88.08 | 84.10 | 95.26 | 68.51 | 92.17 | 83.92 |
+| PSC-UNet（本章方法） | 84.20 | 15.26 | 89.63 | 74.21 | 88.98 | 85.78 | 94.91 | 67.17 | 89.87 | 83.08 |
+| SLR-Unet（本章方法） | **84.47** | **13.48** | **89.81** | **76.37** | 87.93 | **86.38** | 94.57 | **69.41** | 89.46 | 81.79 |
