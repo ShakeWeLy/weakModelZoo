@@ -26,6 +26,7 @@ from .metrics import PERCENT_KEYS, SLICE_METRIC_KEYS, slice_organ_metrics, summa
 from .models import build_model
 from .recorder import RunRecorder, read_json, write_csv, write_json
 from .report import ORGAN_METRICS_FIELDS, build_paper_metrics_rows
+from .volume_metrics import VolumeAccumulator
 
 
 def load_trained_model(cfg: Mapping[str, Any], checkpoint_path: Path, device: torch.device):
@@ -86,6 +87,7 @@ class Predictor:
         organ_rows: list[dict[str, Any]] = []
         per_class: dict[int, dict[str, list]] = {}
         visualized = 0
+        volume_acc = VolumeAccumulator()
 
         for images, labels, names in loader:
             preds = self.model(images.to(self.device)).argmax(dim=1).cpu().numpy()
@@ -100,6 +102,7 @@ class Predictor:
 
                 organ_metrics: dict[int, dict[str, Any]] = {}
                 if has_label:
+                    volume_acc.add(name, pred, label)
                     organ_metrics = slice_organ_metrics(pred, label, self.organ_map)
                     slice_mean: dict[str, list[float]] = {k: [] for k in PERCENT_KEYS}
                     for class_id, metrics in organ_metrics.items():
@@ -126,6 +129,9 @@ class Predictor:
                 slice_rows.append(row)
 
         summary = summarize_organs(per_class, self.space)
+        volume_3d = volume_acc.summarize(self.organ_map)
+        volume_rows = volume_3d.pop("per_case")
+        summary["volume_3d"] = volume_3d  # 官方口径：按病例 3D Dice / HD95
         summary.update({
             "split": split,
             "num_slices": len(slice_rows),
@@ -137,6 +143,8 @@ class Predictor:
             write_csv(split_dir / "slice_metrics.csv", slice_rows)
         if organ_rows:
             write_csv(split_dir / "organ_slice_metrics.csv", organ_rows)
+        if volume_rows:
+            write_csv(split_dir / "volume3d_per_case.csv", volume_rows)
         write_csv(split_dir / "organ_metrics.csv", [
             {
                 "organ": organ, "organ_cn": m["name_cn"], "num_slices": m["num_slices"],
@@ -180,6 +188,12 @@ def format_split_summary(summary: Mapping[str, Any]) -> str:
             f"平均 Dice {_num(summary['mean_dice_percent'], 0)}%  IoU {_num(summary['mean_iou_percent'], 0)}%  "
             f"P {_num(summary['mean_precision_percent'], 0)}%  R {_num(summary['mean_recall_percent'], 0)}%  "
             f"HD95 {_num(summary['mean_hd95'], 0)}px"
+        )
+    vol = summary.get("volume_3d") or {}
+    if vol.get("mean_dice") is not None:
+        lines.append(
+            f"3D 病例口径(官方): 平均 Dice {_num(vol['mean_dice'] * 100, 0)}%  "
+            f"HD95 {_num(vol['mean_hd95'], 0)}px  病例数={vol['num_cases']}"
         )
     for organ, m in summary["per_organ"].items():
         if not m["num_slices"]:
