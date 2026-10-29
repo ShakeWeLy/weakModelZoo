@@ -94,10 +94,30 @@ class SEattention(nn.Module):
         return gated.mean(dim=2)    # 读出: 对节点取平均得到图级特征 [B, V, D]            
 
 
+ABLATIONS = ("none", "woF", "woS", "woC", "woD")
+
+
 class DFSC(nn.Module):
-    def __init__(self, in_features, features_dim, se_dim=64, gat_heads=1, num_classes=2, transformer_embed_dim=20, transformer_heads=1, mlp_dim=128):
+    """
+    ablation 取值（默认 none = 完整模型）:
+      none : 完整 DFSC（SC + T 段 FC，GAT1 + FSC 耦合图 GAT2 + SE + Transformer）
+      woF  : 只用 SC（DTI），无 FC、无耦合图
+      woS  : 只用 FC（fMRI 的 T 段），无 SC、无耦合图
+      woC  : 保留 SC 与 FC，但不建 FSC 耦合图，直接把两者的 GAT1 嵌入送入 SE + Transformer
+      woD  : 去掉时间动态，把 T 段 FC 平均为一个静态 FC，其余结构不变
+    """
+
+    def __init__(self, in_features, features_dim, se_dim=64, gat_heads=1, num_classes=2, transformer_embed_dim=20, transformer_heads=1, mlp_dim=128, ablation="none", dropout=0.0):
         super(DFSC, self).__init__()
+        if ablation not in ABLATIONS:
+            raise ValueError(f"ablation={ablation!r} 不合法，可选: {ABLATIONS}")
+        if not 0.0 <= float(dropout) < 1.0:
+            raise ValueError(f"dropout={dropout} 必须在 [0, 1) 内")
+        self.ablation = ablation
         self.num_classes = num_classes
+        # dropout 默认 0.0 (关闭), 保持与原模型一致; 作用于图级特征、Transformer 输出与 MLP 隐层
+        self.drop_graph = nn.Dropout(float(dropout))
+        self.drop_fused = nn.Dropout(float(dropout))
         self.d = features_dim
         self.gat_1 = GATAttention(in_features=in_features, out_features=features_dim, heads=gat_heads)
         self.gat_2 = GATAttention(in_features=in_features, out_features=features_dim, heads=gat_heads)
@@ -107,6 +127,7 @@ class DFSC(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(features_dim, mlp_dim),
             nn.ReLU(),
+            nn.Dropout(float(dropout)),
             nn.Linear(mlp_dim, num_classes),
         )
 
@@ -119,20 +140,35 @@ class DFSC(nn.Module):
             [B, C]  C=类别数
         """
         b, t, n, _ = x.size()  # t = T+1, d = input features
+
+        # ---- 消融: 改变输入通道 ----
+        if self.ablation == "woF":      # 只保留 SC
+            x = x[:, :1]
+        elif self.ablation == "woS":    # 只保留 FC 段
+            x = x[:, 1:]
+        elif self.ablation == "woD":    # 把 T 段 FC 平均为一个静态 FC
+            x = torch.cat([x[:, :1], x[:, 1:].mean(dim=1, keepdim=True)], dim=1)
+        t = x.size(1)
+
         adj = filter_topk_global(x)
         # 将 B 与时间维合并为一个 batch, 一次性计算所有时间步 (权重共享, 与逐步调用等价)
-        gat_1_score_matrix = self.gat_1(x.reshape(b*t, n, n), adj.reshape(b*t, n, n))  # [B*(T+1), N, D]
-        gat_1_score_matrix = gat_1_score_matrix.reshape(b, t, n, self.d)  # [B, T+1, N, D]
-        personalized_score_matrix = FSC_Personalized(gat_1_score_matrix)  # [B, T, N, N]
-        # gat_2 的输入是 T 个时间步的特征, 同样合并 B 与 T 维
-        t_pers = t - 1
-        pers = personalized_score_matrix.reshape(b*t_pers, n, n)
-        gat_2_score_matrix = self.gat_2(pers, pers)  # [B*T, N, D], 邻接与特征相同
-        gat_2_score_matrix = gat_2_score_matrix.reshape(b, t_pers, n, self.d)  # [B, T, N, D]
+        gat_1_score_matrix = self.gat_1(x.reshape(b*t, n, n), adj.reshape(b*t, n, n))  # [B*t, N, D]
+        gat_1_score_matrix = gat_1_score_matrix.reshape(b, t, n, self.d)  # [B, t, N, D]
 
-        views = torch.cat([gat_1_score_matrix, gat_2_score_matrix], dim=1)  # [B, 2T+1, N, D], 2T+1 个视图
+        views_list = [gat_1_score_matrix]
+        # ---- FSC 耦合图分支: 仅完整模型 / woD 使用（需要 SC 与 FC 同时存在）----
+        if self.ablation in ("none", "woD"):
+            personalized_score_matrix = FSC_Personalized(gat_1_score_matrix)  # [B, T, N, N]
+            t_pers = t - 1
+            pers = personalized_score_matrix.reshape(b*t_pers, n, n)
+            gat_2_score_matrix = self.gat_2(pers, pers)  # [B*T, N, D], 邻接与特征相同
+            views_list.append(gat_2_score_matrix.reshape(b, t_pers, n, self.d))  # [B, T, N, D]
+
+        views = torch.cat(views_list, dim=1)  # 完整模型: [B, 2T+1, N, D]; 消融变体视图数随之变化
         graph_feats = self.se(views)  # SE readout: 每个视图得到一个图级特征 [B, 2T+1, D]
+        graph_feats = self.drop_graph(graph_feats)
         fused = self.transformer(graph_feats)  # 单头 Transformer 融合 2T+1 个图级特征 [B, 2T+1, D]
+        fused = self.drop_fused(fused)
         out = fused.mean(dim=1)  # [B, D]
         return self.mlp(out)  # [B, C] logits, 训练时配合 nn.CrossEntropyLoss; 推理需概率时对输出做 softmax
 

@@ -94,7 +94,15 @@ class CVTrainer:
             self.log.info(f"可训练参数量: {count_parameters(model):,}")
         optimizer = build_optimizer(self.hp, model)
         scheduler = build_scheduler(self.hp, optimizer, self.num_epochs)
-        criterion = nn.CrossEntropyLoss()
+        if str(self.hp.get("class_weight", "none")).lower() == "balanced":
+            counts = torch.bincount(y_tr, minlength=2).float()
+            weights = counts.sum() / (2 * counts.clamp(min=1))
+            criterion = nn.CrossEntropyLoss(weight=weights.to(self.device))
+            if fold == 1:
+                self.log.info(f"类别加权损失: weights={weights.tolist()}")
+        else:
+            criterion = nn.CrossEntropyLoss()
+        eval_criterion = nn.CrossEntropyLoss()
 
         batch_size = int(self.ds["batch_size"])
         train_loader = make_loader(X_tr, y_tr, batch_size, shuffle=True, seed=self.seed + fold)
@@ -107,7 +115,7 @@ class CVTrainer:
                 t0 = time.time()
                 lr = optimizer.param_groups[0]["lr"]
                 train_loss = self._train_epoch(model, train_loader, optimizer, criterion)
-                val_loss, val_prob = self._eval_epoch(model, val_loader, criterion)
+                val_loss, val_prob = self._eval_epoch(model, val_loader, eval_criterion)
                 m = binary_metrics(y_va.numpy(), val_prob, self.threshold)
                 row = {"epoch": epoch, "lr": lr, "train_loss": train_loss, "val_loss": val_loss, **m}
                 history.append(row)
