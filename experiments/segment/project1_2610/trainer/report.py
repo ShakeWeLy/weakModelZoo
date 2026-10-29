@@ -65,12 +65,41 @@ def build_paper_metrics_rows(predictions_dir: Path) -> list[dict[str, str]]:
             "FP ratio (%)": fmt_num(summary.get("mean_fp_ratio_percent"), 2),
             "FN ratio (%)": fmt_num(summary.get("mean_fn_ratio_percent"), 2),
         }
+        volume = summary.get("volume_3d") or {}
+        if volume.get("mean_dice") is not None:
+            row["3D Dice (%)"] = fmt_num(volume["mean_dice"] * 100, 2)
+            row["3D HD95 (px)"] = fmt_num(volume.get("mean_hd95"), 2)
         for organ, metrics in summary.get("per_organ", {}).items():
             cn = metrics.get("name_cn") or organ
             row[f"{cn} Dice (%)"] = fmt_num(metrics.get("dice_percent"), 2)
             row[f"{cn} IoU (%)"] = fmt_num(metrics.get("iou_percent"), 2)
         rows.append(row)
     return rows
+
+
+def build_volume_tables(predictions_dir: Path) -> list[tuple[str, list[list[str]]]]:
+    """按病例 3D 口径（官方 TransUNet / Swin-Unet 的 test.py）的各器官 Dice / HD95 表。"""
+    tables: list[tuple[str, list[list[str]]]] = []
+    for split in SPLITS:
+        summary = read_json(Path(predictions_dir) / split / "summary.json")
+        volume = summary.get("volume_3d") or {}
+        if volume.get("mean_dice") is None:
+            continue
+        cn_map = {organ: m.get("name_cn") or organ for organ, m in summary.get("per_organ", {}).items()}
+        rows: list[list[str]] = []
+        for organ, m in volume.get("per_organ", {}).items():
+            rows.append([
+                cn_map.get(organ, organ),
+                fmt_num(m["dice"] * 100 if m.get("dice") is not None else None, 2),
+                fmt_num(m.get("hd95"), 2),
+                str(m.get("num_cases", "")),
+            ])
+        rows.append([
+            "**宏平均**", fmt_num(volume["mean_dice"] * 100, 2),
+            fmt_num(volume.get("mean_hd95"), 2), str(volume.get("num_cases", "")),
+        ])
+        tables.append((split, rows))
+    return tables
 
 
 def _date_cn(value: str | None) -> str:
@@ -136,10 +165,29 @@ def build_summary_markdown(recorder: RunRecorder) -> str:
         lines.extend([
             f"### {section} 整体指标对比",
             "",
-            "基于 analyze 推理结果；宏平均为各目标器官切片级均值的平均（不含背景），百分比列单位为 %。",
+            "基于 analyze 推理结果；前几列为切片级口径（各目标器官切片级均值的宏平均，不含背景），"
+            "`3D` 列为官方口径（按病例拼成 3D 体后计算，见下方小节），百分比列单位为 %。",
             "",
             markdown_table(["split", *fields], [[row["split"], *(row.get(f, "") for f in fields)] for row in paper_rows]),
         ])
+
+    volume_tables = build_volume_tables(recorder.predictions_dir)
+    if volume_tables:
+        section += 1
+        lines.extend([
+            f"### {section} 3D 病例口径指标（官方 TransUNet / Swin-Unet 口径）",
+            "",
+            "按病例将切片拼成 3D 体，对每个器官计算 3D Dice 与 HD95，再对病例取平均、对器官取宏平均。"
+            "空掩码规则与官方一致：仅预测有该器官记 Dice=1；GT 有而预测为空，或两者都为空记 Dice=0。"
+            "来源 `predictions/<split>/volume3d_per_case.csv` 与 `summary.json` 的 `volume_3d`。",
+            "",
+        ])
+        for split, rows in volume_tables:
+            lines.extend([
+                f"**{SPLIT_CN[split]}**",
+                "",
+                markdown_table(["器官", "Dice (%)", "HD95 (px)", "病例数"], rows),
+            ])
 
     organ_tables: dict[str, list[dict[str, str]]] = {
         split: rows
