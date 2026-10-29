@@ -34,7 +34,15 @@ def load_trained_model(cfg: Mapping[str, Any], checkpoint_path: Path, device: to
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     space = LabelSpace.from_config(cfg)
     model = build_model(cfg, space.num_classes).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    # 旧版 checkpoint 含完整权重；新版只含可训练部分，冻结的预训练子模块（如 SAM3）
+    # 已在 build_model 时从 cfg 中的权重路径加载，这里允许其缺失，其余键必须齐全。
+    result = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    frozen = tuple(checkpoint.get("frozen_prefixes", []))
+    missing = [k for k in result.missing_keys if not k.startswith(frozen)]
+    if missing or result.unexpected_keys:
+        raise RuntimeError(
+            f"checkpoint 与模型结构不匹配: missing={missing[:5]}, unexpected={result.unexpected_keys[:5]}"
+        )
     model.eval()
     return model, checkpoint
 

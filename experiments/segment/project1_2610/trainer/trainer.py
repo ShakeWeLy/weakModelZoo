@@ -39,10 +39,23 @@ def resolve_device(requested: str | None) -> torch.device:
     return torch.device(requested or ("cuda" if torch.cuda.is_available() else "cpu"))
 
 
+def frozen_prefixes(model: nn.Module) -> tuple[str, ...]:
+    """返回所有参数都被冻结的子模块前缀（如 SLR-UNet 的 ``transformer.``，即 SAM3）。"""
+    prefixes: list[str] = []
+    for name, module in model.named_modules():
+        params = list(module.parameters(recurse=True))
+        if name and params and not any(p.requires_grad for p in params):
+            prefixes.append(name + ".")
+    return tuple(prefixes)
+
+
 def checkpoint_state(model: nn.Module, cfg: Mapping[str, Any], epoch: int, val_dice: float,
                      optimizer: torch.optim.Optimizer | None = None) -> dict[str, Any]:
+    # 冻结的预训练子模块（如 SAM3）不写入 checkpoint，推理时由 cfg 中的权重路径重新加载
+    frozen = frozen_prefixes(model)
     state: dict[str, Any] = {
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": {k: v for k, v in model.state_dict().items() if not k.startswith(frozen)},
+        "frozen_prefixes": list(frozen),
         "epoch": epoch,
         "val_dice": val_dice,
         "config": dict(cfg),
