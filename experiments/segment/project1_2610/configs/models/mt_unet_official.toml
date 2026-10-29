@@ -1,0 +1,40 @@
+# 官方 MT-UNet（Dootmaan/MT-UNet）：从零训练，不加载预训练权重。
+# 超参对齐官方 train_mtunet_Synapse.py（Adam 1e-4 / wd 1e-4 / Dice0.5+CE0.5 / 100 epochs）。
+# 注意：网络位置编码写死 224 输入，image_size 必须为 224（global.toml 默认即 224）。
+
+[experiments]
+name = "2026-10-29_001_MT-UNet-Official_V1"
+description = "MT-UNet official | from scratch | Dice(0.5)+CE(0.5) | Adam 1e-4"
+
+[model]
+arch = "mt_unet_official"
+display_name = "MT-UNet-Official"
+# 官方 Dataset 给 1 通道，模型 forward 内再复制为 3 通道
+repeat_gray_to_rgb = false
+
+[model.params]
+# 网络结构无可调参数；不加载任何预训练权重
+
+[dataset]
+batch_size = 12               # 官方 train_mtunet_Synapse.py 默认
+
+[hyperparameters]
+optimizer = "adam"
+learning_rate = 0.0001        # 官方 --lr 默认
+weight_decay = 0.0001
+num_epochs = 100              # 官方 --max_epochs 默认
+lr_scheduler = "poly"         # 官方按 iter 做 (1 - it/max)^0.9 衰减，此处按 epoch 近似
+lr_poly_power = 0.9
+
+[train]
+dice_loss_weight = 0.5
+ce_loss_weight = 0.5
+guaranteed_sampling = false
+early_stopping = false
+amp = false
+
+[quick.dataset]
+batch_size = 2
+
+[quick.hyperparameters]
+num_epochs = 2

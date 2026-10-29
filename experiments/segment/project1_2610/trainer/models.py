@@ -45,6 +45,11 @@ def _validate_div16(image_size: int, params: Mapping[str, Any]) -> None:
         raise ValueError(f"image_size 需能被 16 整除（4 次下采样），当前为 {image_size}")
 
 
+def _validate_224(image_size: int, params: Mapping[str, Any]) -> None:
+    if image_size != 224:
+        raise ValueError(f"MT-UNet 的位置编码固定为 28×28（对应 224 输入），当前 image_size={image_size}")
+
+
 MODEL_REGISTRY: dict[str, ModelSpec] = {
     "unet": ModelSpec("src/models/segment/unet/unet.py", "UNet", validate=_validate_div16),
     "attn_unet": ModelSpec(
@@ -74,6 +79,11 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         "src/models/segment/SLR_Unet/SLR_Unet.py",
         "SLR_Unet",
         validate=_validate_div16,
+    ),
+    "mt_unet_official": ModelSpec(
+        "src/models/segment/MT_UNet/MT_UNet.py",
+        "MTUNetOfficial",
+        validate=_validate_224,
     ),
 }
 
