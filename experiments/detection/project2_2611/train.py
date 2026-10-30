@@ -1,7 +1,7 @@
 """训练入口：全局配置 + 模型配置合并后交给通用 Trainer。
 
 用法（在项目根目录执行）：
-    python experiments/detection/project2_2611/train.py -m yolov5s
+    python experiments/detection/project2_2611/train.py -m sgc_yolov5s
     python experiments/detection/project2_2611/train.py -m yolov5s --epochs 50 --set train.mosaic_prob=0.5
     python experiments/detection/project2_2611/train.py -m yolov5s --quick -n _smoke --analyze   # 冒烟测试
     python experiments/detection/project2_2611/train.py -m yolov5s --set model.params.variant=m    # 换 YOLOv5m

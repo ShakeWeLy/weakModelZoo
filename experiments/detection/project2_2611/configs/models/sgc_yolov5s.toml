@@ -10,7 +10,7 @@ arch = "sgc_yolov5"
 display_name = "SGC_YOLOv5"
 
 [model.params]
-variant = "s"                # 规模：n / s / m / l / x
+variant = "m"                # 规模：n / s / m / l / x
 
 [hyperparameters]
 num_epochs = 300             # 与 yolov5s 保持一致，便于对比

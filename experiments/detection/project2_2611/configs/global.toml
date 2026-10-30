@@ -15,7 +15,7 @@ description = ""
 # YOLO 格式目录：data_dir/data.yaml（读取 nc / names）+ images/{train,val,test} + labels/{train,val,test}
 data_dir = "data/Det_Fly"
 image_size = 640             # 网络输入边长（letterbox 后的正方形尺寸），需为 32 的倍数
-batch_size = 4
+batch_size = 16
 num_workers = 0              # DataLoader 子进程数；Windows 下建议 0
 augment = true               # 开关：训练增强总开关；关闭时训练也只做 letterbox
 mosaic_prob = 1.0            # Mosaic 增强概率（需 augment=true）；0 = 关闭
@@ -26,7 +26,7 @@ optimizer = "sgd"            # 可选: sgd / adam / adamw（YOLOv5 默认 sgd）
 learning_rate = 0.01         # 初始学习率 lr0
 momentum = 0.937             # sgd 动量 / adam beta1
 weight_decay = 0.0005        # 只作用于卷积权重，BN 与 bias 不做衰减
-num_epochs = 100
+num_epochs = 300
 lr_scheduler = "linear"      # 可选: none / linear / cosine
 lr_final_factor = 0.01       # linear / cosine：末端学习率 = learning_rate * lr_final_factor
 warmup_epochs = 3.0          # 迭代级 warmup 的 epoch 数（0 = 关闭），与官方一致
