@@ -1,0 +1,309 @@
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from src.module.conv import DepthwiseConv, GhostConv, BaseConv
+from src.models.detection.YOLO.common import Conv, SPPF
+
+
+class SGhostConv(GhostConv):
+    '''
+    最后做额外的通道混洗
+    '''
+    def __init__(self,
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=1,
+                ratio=2,
+                groups_ratio=2,
+                dw_kernel_size=3,
+                act=True,
+                bn=True,
+                ):
+        super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                         stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
+                         act=act, bn=bn)
+        self.groups = out_channels // groups_ratio
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = super().forward(x)
+        return torch.nn.ChannelShuffle(self.groups)(x)
+
+
+class GBS(GhostConv):
+    '''
+    Ghost + BN + SILU
+    '''
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=3,
+                 stride=1,
+                 padding=1,
+                 ratio=2,
+                 groups_ratio=2,
+                 dw_kernel_size=3,
+                 act=F.silu,
+                 bn=F.batch_norm,
+                 ) -> None:
+        # groups_ratio 仅 SGhostConv 的通道混洗使用，GhostConv 不需要
+        super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                         stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
+                         act=act, bn=bn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x)
+
+
+class DFCAttention(nn.Module):
+    '''
+    DFC注意力模块利用~固定权重~(可学习的)全连接层来创建具有全局感受野的注意力图，
+    以捕获长距离空间位置的依赖关系从而增强S-Ghost 模块
+    '''
+    def __init__(self, channels, kernel_size=5):
+        super().__init__()
+        # 用深度卷积模拟水平/垂直方向的全连接层
+        self.h_conv = nn.Conv2d(channels, channels, (1, kernel_size),
+                                padding=(0, kernel_size//2), groups=channels)
+        self.v_conv = nn.Conv2d(channels, channels, (kernel_size, 1),
+                                padding=(kernel_size//2, 0), groups=channels)
+        self.sigmoid = nn.Sigmoid()
+    def forward(self, x):
+        h_feat = self.h_conv(x)
+        v_feat = self.v_conv(x)
+        return self.sigmoid(h_feat * v_feat)
+
+
+
+class Bottleneck(nn.Module):
+    '''
+    特征增强, 不改变size和channel,
+    '''
+    def __init__(self,
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=1,
+                ratio=2,
+                groups_ratio=2,
+                dw_kernel_size=3,
+                act=F.silu,
+                bn=F.batch_norm,
+                ) -> None:
+        super().__init__()
+        if in_channels != out_channels:
+            raise ValueError("Bottleneck 要求 in_channels == out_channels（DFC 注意力作用在输入上，需与 x1 通道一致）")
+        self.stride = stride
+        self.SGhostConv1 = SGhostConv(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                                      stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
+                                      dw_kernel_size=dw_kernel_size, act=act, bn=bn)
+        self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size,
+                                      stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
+                                      dw_kernel_size=dw_kernel_size, act=act, bn=bn)
+        self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)
+        self.DFCAttention = DFCAttention(in_channels)
+        self.DWConv2 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)
+        # 普通卷积做通道对齐（stride=2 分支使用），不能用 groups=out_channels 的深度卷积
+        self.Conv = BaseConv(in_channels, out_channels, kernel_size, stride, act=act, bn=bn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        res = self.DWConv2(x)
+        x1 = self.SGhostConv1(x)
+        x2 = self.DFCAttention(x)
+        x = x1*x2
+
+        if self.stride == 2:
+            x = self.DWConv1(x)
+            res = self.Conv(res)
+        x = self.SGhostConv2(x)
+        return x + res
+
+
+class SDGhost(nn.Module):
+    """
+    和SGhost结合, SGhostConv+SDGhost, 替换CSP1,2,3
+    并且在CSP3和SPP之间有一个CSP3.5, channel = 1024
+    """
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=1,
+                 stride=1,
+                 padding=1,
+                 ratio=2,
+                 groups_ratio=2,
+                 dw_kernel_size=3,
+                 act=F.silu,
+                 bn=F.batch_norm,
+                 ) -> None:
+        super().__init__()
+        self.GBS1 = GBS(in_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.GBS2 = GBS(out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.bottleneck = Bottleneck(in_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.GBS1(x)
+        x = x + self.bottleneck(x)
+        x = self.GBS2(x)
+        return x
+
+
+class GSConv(nn.Module):
+    '''
+    CSP4 = 一个GSConv+upsample到512
+    '''
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=1,
+                 stride=1,
+                 ratio=2,
+                 groups_ratio=2,
+                 dw_kernel_size=3,
+                 act=F.silu,
+                 bn=F.batch_norm,
+                ):
+        super().__init__()
+        # 输出 = 普通卷积分支(dw_channels) + 深度卷积分支(dw_channels)，只有 ratio=2 且 out 为偶数时才等于 out_channels
+        if ratio != 2 or out_channels % 2 != 0:
+            raise ValueError(f"GSConv 要求 ratio=2 且 out_channels 为偶数，当前 ratio={ratio}, out_channels={out_channels}")
+        self.dw_channels = out_channels // ratio
+        self.groups = self.dw_channels // groups_ratio
+        self.conv = BaseConv(in_channels, self.dw_channels, kernel_size, stride, act=act, bn=bn)
+        self.DWconv = DepthwiseConv(self.dw_channels, dw_kernel_size, act=act, bn=bn)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv(x)
+        x = torch.cat([x, self.DWconv(x)], dim=1)
+        return torch.nn.ChannelShuffle(self.groups)(x)
+
+class VOVGCSP(nn.Module):
+    '''
+    该结构将输入分为两部分，其中一部分经过卷积操作实现通道数缩减，
+    有效地控制了计算复杂度；另一部分在改变通道数后经过GS bottleneck，进一步增强了特征的提取能力。
+    再将这两部分输出拼接在一起，进行卷积操作以实现输出通道的调整。
+
+    VOVGCSP + GSConv替换 CSP5,6,7,8
+    '''
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=1,
+                 stride=1,
+                 ratio=2,
+                 groups_ratio=2,
+                 ghost_ratio=2,
+                 dw_kernel_size=3,
+                 act=F.silu,
+                 bn=F.batch_norm,
+                 ) -> None:
+        super().__init__()
+        self.in_channels = in_channels
+        self.in_channels_half = in_channels//2
+        self.in_channels_reduce = in_channels - self.in_channels_half
+        self.in_channels_half_ghost = self.in_channels_half * ghost_ratio
+
+        self.conv_bottle_input = BaseConv(self.in_channels_half, self.in_channels_half_ghost, 1, stride, act=act, bn=bn)  # 调整通道数
+        self.conv_bottle_res = BaseConv(self.in_channels_half_ghost, self.in_channels_half, 1, stride, act=act, bn=bn)  # 残差连接，通道对齐到 GSConv2 输出
+        self.GSConv1 = GSConv(self.in_channels_half_ghost, self.in_channels_half_ghost, kernel_size, stride, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.GSConv2 = GSConv(self.in_channels_half_ghost, self.in_channels_half, kernel_size, stride, ratio, groups_ratio, dw_kernel_size, act, bn)
+
+        self.conv_reduce = BaseConv(self.in_channels_reduce, self.in_channels_reduce, 1, stride, act=act, bn=bn)  # 通道数缩减
+
+        self.conv_out = BaseConv(in_channels, out_channels, 1, stride, act=act, bn=bn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x1, x2 = torch.split(x, [self.in_channels_half, self.in_channels_reduce], dim=1)
+        x1 = self.conv_bottle_input(x1)
+        x1 = self.GSConv2(self.GSConv1(x1)) + self.conv_bottle_res(x1)  # Gs bottleneck
+        x2 = self.conv_reduce(x2)
+        x = torch.cat([x1, x2], dim=1)
+        return self.conv_out(x)
+    
+class CBAM(nn.Module):
+    '''
+    CBAM注意力模块
+    '''
+    def __init__(self, channels):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels//16),
+            nn.ReLU(),
+            nn.Linear(channels//16, channels),
+            nn.Sigmoid()
+        )
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.avg_pool(x)
+        x = self.fc(x)
+        return x
+
+
+class Backbone(nn.Module):
+    def __init__(self, ):
+        self.stem = Conv(3, 64, 6, 2, 2) # [3,224,224] --> [64,112,112]
+        self.stage2 = nn.Sequential(
+            SGhostConv(64, 128, 3, 2, 1),
+            SDGhost(128, 128, 3, 1, 1),
+        )
+        self.stage3 = nn.Sequential(
+            SGhostConv(128, 256, 3, 2, 1),
+            SDGhost(256, 256, 3, 1, 1),
+        )
+        self.stage4 = nn.Sequential(
+            SGhostConv(256, 512, 3, 2, 1),
+            SDGhost(512, 512, 3, 1, 1),
+        )
+        self.stage5 = nn.Sequential(
+            SGhostConv(512, 1024, 3, 2, 1),
+            SDGhost(1024, 1024, 3, 1, 1),
+            SPPF(1024, 1024, 5)
+        )
+        
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = self.stem(x)
+        x = self.stage2(x)
+        p3 = self.stage3(x)
+        p4 = self.stage4(p3)
+        p5 = self.stage5(p4)
+        return p3, p4, p5
+
+
+class Neck(nn.Module):
+    """PANet：FPN 自顶向下 + PAN 自底向上，输出 N3 / N4 / N5。"""
+    def __init__(self, ch3: int, ch4: int, ch5: int, gw: float, gd: float) -> None:
+        self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
+
+        self.reduce5 = GSConv(1024,512,1,1)
+        self.c3_p4 = VOVGCSP(512+512,512,3)
+        self.reduce4 = GSConv(512,256,1,1)
+        self.c3_p3 = VOVGCSP(256+256,256,3)
+
+        self.down3 = GSConv(256,256,3,2)
+        self.c3_n4 = VOVGCSP(256+256,512,3)
+        self.down4 = GSConv(512,512,3,2)
+        self.c3_n5 = VOVGCSP(512+512,1024,3)
+
+        self.out_channels = (256, 512, 1024)
+        self.cbam_p3 = CBAM(256)
+        self.cbam_p4 = CBAM(512)
+        self.cbam_p5 = CBAM(1024)
+
+    def forward(
+        self, p3: torch.Tensor, p4: torch.Tensor, p5: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x10 = self.reduce5(p5)
+        x13 = self.c3_p4(torch.cat((self.up(x10), p4), dim=1))
+        x14 = self.reduce4(x13)
+        n3 = self.c3_p3(torch.cat((self.up(x14), p3), dim=1))
+        n4 = self.c3_n4(torch.cat((self.down3(n3), x14), dim=1))
+        n5 = self.c3_n5(torch.cat((self.down4(n4), x10), dim=1))
+        n3 = self.cbam_p3(n3)
+        n4 = self.cbam_p4(n4)
+        n5 = self.cbam_p5(n5)
+        return n3, n4, n5
+

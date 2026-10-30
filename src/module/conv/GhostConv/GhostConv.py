@@ -30,6 +30,7 @@ class GhostConv(nn.Module):
         out_channels: int,
         kernel_size: int = 1,
         stride: int = 1,
+        padding: int = 1,
         ratio: int = 2,
         dw_kernel_size: int = 3,
         act: ActArg = True,
@@ -56,6 +57,7 @@ class GhostConv(nn.Module):
             out_channels=self.identity_num,
             kernel_size=kernel_size,
             stride=stride,
+            padding=padding,
             act=act,
             bn=bn,
         )
@@ -71,6 +73,7 @@ class GhostConv(nn.Module):
             out_channels=self.cheap_num,
             kernel_size=dw_kernel_size,
             stride=1,
+            padding=padding,
             groups=self.identity_num,
             act=act,
             bn=bn,
