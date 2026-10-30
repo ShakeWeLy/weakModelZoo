@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from src.module.conv import DepthwiseConv, GhostConv, BaseConv
 from src.models.detection.YOLO.common import Conv, SPPF
+from src.models.detection.YOLO.yolov5 import _Scaler  # 与标准 YOLOv5 相同的缩放规则
 from src.module.attention import CAM
 from src.module.attention.SAM.sam import SAM
 
@@ -269,26 +270,28 @@ class CBAM(nn.Module):
 
 
 class Backbone(nn.Module):
-    def __init__(self, ):
+    def __init__(self, gw: float = 1.0, gd: float = 1.0, in_channels: int = 3) -> None:
         super().__init__()
-        self.stem = Conv(3, 64, 6, 2, 2) # [3,224,224] --> [64,112,112]
-        self.stage2 = nn.Sequential(
-            SGhostConv(64, 128, 3, 2, 1),
-            SDGhost(128, 128, n=3),
+        s = _Scaler(gw, gd)
+        self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
+        self.stage2 = nn.Sequential(  # P2/4
+            SGhostConv(s.c(64), s.c(128), 3, 2, 1),
+            SDGhost(s.c(128), s.c(128), n=s.n(3)),
         )
-        self.stage3 = nn.Sequential(
-            SGhostConv(128, 256, 3, 2, 1),
-            SDGhost(256, 256, n=6),
+        self.stage3 = nn.Sequential(  # P3/8
+            SGhostConv(s.c(128), s.c(256), 3, 2, 1),
+            SDGhost(s.c(256), s.c(256), n=s.n(6)),
         )
-        self.stage4 = nn.Sequential(
-            SGhostConv(256, 512, 3, 2, 1),
-            SDGhost(512, 512, n=9),
+        self.stage4 = nn.Sequential(  # P4/16
+            SGhostConv(s.c(256), s.c(512), 3, 2, 1),
+            SDGhost(s.c(512), s.c(512), n=s.n(9)),
         )
-        self.stage5 = nn.Sequential(
-            SGhostConv(512, 1024, 3, 2, 1),
-            SDGhost(1024, 1024, n=3),
-            SPPF(1024, 1024, 5)
+        self.stage5 = nn.Sequential(  # P5/32
+            SGhostConv(s.c(512), s.c(1024), 3, 2, 1),
+            SDGhost(s.c(1024), s.c(1024), n=s.n(3)),
+            SPPF(s.c(1024), s.c(1024), 5),
         )
+        self.out_channels = (s.c(256), s.c(512), s.c(1024))
         
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.stem(x)
@@ -305,20 +308,24 @@ class Neck(nn.Module):
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
 
-        self.reduce5 = GSConv(1024,512,1,1)
-        self.c3_p4 = VOVGCSP(512+512,512,n=3)
-        self.reduce4 = GSConv(512,256,1,1)
-        self.c3_p3 = VOVGCSP(256+256,256,n=3)
+        s = _Scaler(gw, gd)
+        # 通道数由 Backbone 输出推导（已按 gw 缩放），不再写死
+        c3, c4, c5 = ch3, ch4, ch5
 
-        self.down3 = GSConv(256,256,3,2)
-        self.c3_n4 = VOVGCSP(256+256,512,n=3)
-        self.down4 = GSConv(512,512,3,2)
-        self.c3_n5 = VOVGCSP(512+512,1024,n=3)
+        self.reduce5 = GSConv(c5, c4, 1, 1)
+        self.c3_p4 = VOVGCSP(c4 + c4, c4, n=s.n(3))
+        self.reduce4 = GSConv(c4, c3, 1, 1)
+        self.c3_p3 = VOVGCSP(c3 + c3, c3, n=s.n(3))
 
-        self.out_channels = (256, 512, 1024)
-        self.cbam_p3 = CBAM(256)
-        self.cbam_p4 = CBAM(512)
-        self.cbam_p5 = CBAM(1024)
+        self.down3 = GSConv(c3, c3, 3, 2)
+        self.c3_n4 = VOVGCSP(c3 + c3, c4, n=s.n(3))
+        self.down4 = GSConv(c4, c4, 3, 2)
+        self.c3_n5 = VOVGCSP(c4 + c4, c5, n=s.n(3))
+
+        self.out_channels = (c3, c4, c5)
+        self.cbam_p3 = CBAM(c3)
+        self.cbam_p4 = CBAM(c4)
+        self.cbam_p5 = CBAM(c5)
 
     def forward(
         self, p3: torch.Tensor, p4: torch.Tensor, p5: torch.Tensor
