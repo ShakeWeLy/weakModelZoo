@@ -1,0 +1,17 @@
+# YOLOv5s。未写的键沿用 configs/global.toml。
+# 切换规模：--set model.params.variant=n / m / l / x
+
+[experiments]
+name = "2026-10-30_002_YOLOv5s_V1"
+description = "YOLOv5s from scratch | Det_Fly | Mosaic + flip | SGD 0.01 + warmup + linear | 300 epochs"
+
+[model]
+arch = "yolov5"
+display_name = "YOLOv5"
+
+[model.params]
+variant = "s"                # 规模：n / s / m / l / x
+
+[hyperparameters]
+num_epochs = 300             # 官方从零训练的常用轮数；Det_Fly 每 epoch 仅 4 个 iter，需要足够多的迭代才能学到 objectness
+# anchors = [[10,13,16,30,33,23],[30,61,62,45,59,119],[116,90,156,198,373,326]]  # 留空则用官方默认锚框

@@ -1,0 +1,82 @@
+# 全局配置：所有模型共享。configs/models/<model>.toml 中的同名键会覆盖这里的值。
+# 合并顺序: global → model → global.[quick] → model.[quick]（仅 --quick）→ CLI --epochs / --set
+#
+# 约定：
+#   - 布尔键即"开关"：true = 开启，false = 关闭。
+#   - 数值键若写 0 表示关闭，注释中会明确标出。
+
+[experiments]
+runs_dir = "runs"   # 结果目录，相对 project2_2611/<model.display_name>/，也可写绝对路径
+date = ""           # 实验日期（YYYY-MM-DD）；留空 = 运行当天
+name = ""           # run 名称；留空则自动命名为 <date>_<display_name>_V1，已存在则递增版本号
+description = ""
+
+[dataset]
+# YOLO 格式目录：data_dir/data.yaml（读取 nc / names）+ images/{train,val,test} + labels/{train,val,test}
+data_dir = "data/Det_Fly"
+image_size = 640             # 网络输入边长（letterbox 后的正方形尺寸），需为 32 的倍数
+batch_size = 4
+num_workers = 0              # DataLoader 子进程数；Windows 下建议 0
+augment = true               # 开关：训练增强总开关；关闭时训练也只做 letterbox
+mosaic_prob = 1.0            # Mosaic 增强概率（需 augment=true）；0 = 关闭
+fliplr = 0.5                 # 水平翻转概率（需 augment=true）；0 = 关闭
+
+[hyperparameters]
+optimizer = "sgd"            # 可选: sgd / adam / adamw（YOLOv5 默认 sgd）
+learning_rate = 0.01         # 初始学习率 lr0
+momentum = 0.937             # sgd 动量 / adam beta1
+weight_decay = 0.0005        # 只作用于卷积权重，BN 与 bias 不做衰减
+num_epochs = 100
+lr_scheduler = "linear"      # 可选: none / linear / cosine
+lr_final_factor = 0.01       # linear / cosine：末端学习率 = learning_rate * lr_final_factor
+warmup_epochs = 3.0          # 迭代级 warmup 的 epoch 数（0 = 关闭），与官方一致
+warmup_bias_lr = 0.1         # warmup 期间 bias 组的起始学习率
+warmup_momentum = 0.8        # warmup 期间的起始动量
+
+[loss]
+# 与官方 YOLOv5 hyp.scratch-low.yaml 一致
+box = 0.05                   # 框回归（CIoU）损失权重
+obj = 1.0                    # 目标性损失权重
+cls = 0.5                    # 类别损失权重
+anchor_t = 4.0               # 锚框宽高比匹配阈值
+balance = [4.0, 1.0, 0.4]    # P3 / P4 / P5 的 obj 损失权重，长度需等于检测尺度数（3）
+cls_pw = 1.0                 # 类别 BCE 的 pos_weight
+obj_pw = 1.0                 # 目标性 BCE 的 pos_weight
+
+[train]
+device = "cuda"              # 可选: cuda / cpu；CUDA 不可用时自动回退到 cpu
+seed = 42
+amp = true                   # 开关：混合精度（仅 CUDA 生效）
+grad_clip_norm = 0.0         # 梯度裁剪阈值；0 = 关闭
+limit_batches = 0            # 调试：每个 epoch 只跑前 N 个 batch；0 = 跑完整 epoch
+ema = true                   # 开关：模型 EMA（验证 / 保存的 checkpoint 使用 EMA 权重）
+ema_decay = 0.9999           # EMA 衰减上限
+ema_tau = 2000               # EMA 预热时间常数（迭代步数）
+
+# 早停依据：验证集 mAP@0.5:0.95
+early_stopping = false       # 开关：true = mAP 连续 patience 个 epoch 未提升则停止
+early_stopping_patience = 30
+early_stopping_min_delta = 0.0
+
+[test]
+# 验证（每个 epoch 的 mAP）与 analyze 共用的推理 / NMS 设置
+device = "cuda"              # 推理设备：cuda / cpu
+checkpoint = "best"          # 使用的 checkpoint：best（最佳 mAP）/ last
+splits = ["val", "test"]     # eval.py 默认评估的 split 列表
+conf_thres = 0.001           # 计算 mAP 时的置信度阈值（越低越好，与官方一致）
+iou_thres = 0.6              # NMS IoU 阈值
+max_det = 300                # 每张图最多保留的检测框数
+save_visualizations = true   # 开关：保存可视化 PNG
+vis_conf_thres = 0.25        # 可视化时的置信度阈值
+visualize_num = 20           # 每个 split 最多可视化的图片数
+
+# --quick：快速冒烟测试，仅在 train.py --quick 时叠加
+[quick.hyperparameters]
+num_epochs = 2
+
+[quick.train]
+limit_batches = 2
+
+[quick.test]
+splits = ["val"]
+visualize_num = 3
