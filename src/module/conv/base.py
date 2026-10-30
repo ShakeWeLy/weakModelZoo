@@ -1,9 +1,21 @@
-from typing import TypeAlias
+from typing import Callable, TypeAlias
 import torch
 import torch.nn as nn
 
 NormArg: TypeAlias = bool | nn.Module | None
-ActArg: TypeAlias = bool | nn.Module | None
+# act 可以是：True（默认 SiLU）/ False（无激活）/ nn.Module / 函数（如 F.silu、F.relu）
+ActArg: TypeAlias = bool | nn.Module | Callable[[torch.Tensor], torch.Tensor] | None
+
+
+class FunctionalAct(nn.Module):
+    """把普通函数（如 F.silu）包装成 nn.Module，便于放入 nn.Sequential。"""
+
+    def __init__(self, fn: Callable[[torch.Tensor], torch.Tensor]) -> None:
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fn(x)
 
 
 class BaseConv(nn.Module):
@@ -49,8 +61,11 @@ class BaseConv(nn.Module):
         elif bn:
             layers.append(nn.BatchNorm2d(out_channels))
 
+        # 注意：nn.Module 也是 callable，所以必须先判断 nn.Module
         if isinstance(act, nn.Module):
             layers.append(act)
+        elif callable(act):
+            layers.append(FunctionalAct(act))
         elif act:
             layers.append(nn.SiLU())
 
