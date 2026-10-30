@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.module.conv import DepthwiseConv, GhostConv, BaseConv
 from src.models.detection.YOLO.common import Conv, SPPF
-from src.models.detection.YOLO.yolov5 import _Scaler  # 与标准 YOLOv5 相同的缩放规则
+from src.models.detection.YOLO.yolov5 import DEFAULT_ANCHORS, VARIANTS, Detect, _Scaler  # _Scaler: 与标准 YOLOv5 相同的缩放规则
 from src.module.attention import CAM
 from src.module.attention.SAM.sam import SAM
 
@@ -19,7 +19,7 @@ class SGhostConv(GhostConv):
                 out_channels,
                 kernel_size=1,
                 stride=1,
-                padding=1,
+                padding=None,
                 ratio=2,
                 groups_ratio=2,
                 dw_kernel_size=3,
@@ -45,7 +45,7 @@ class GBS(GhostConv):
                  out_channels,
                  kernel_size=3,
                  stride=1,
-                 padding=1,
+                 padding=None,
                  ratio=2,
                  groups_ratio=2,
                  dw_kernel_size=3,
@@ -90,7 +90,7 @@ class Bottleneck(nn.Module):
                 out_channels,
                 kernel_size=1,
                 stride=1,
-                padding=0,
+                padding=None,
                 ratio=2,
                 groups_ratio=2,
                 dw_kernel_size=1,
@@ -139,7 +139,7 @@ class SDGhost(nn.Module):
                  n=1,
                  kernel_size=1,
                  stride=1,
-                 padding=0,
+                 padding=None,
                  ratio=2,
                  groups_ratio=2,
                  dw_kernel_size=1,
@@ -340,4 +340,46 @@ class Neck(nn.Module):
         n4 = self.cbam_p4(n4)
         n5 = self.cbam_p5(n5)
         return n3, n4, n5
+
+
+class SGC_YOLOv5(nn.Module):
+    """SGC-YOLOv5 检测模型：SGC Backbone + PANet Neck（输出前接 CBAM）+ 标准 Detect 头。
+
+    接口与 ``YOLOv5`` 一致（``.detect`` / ``.nc``），可直接与 ``YOLOv5Loss`` 和训练工程配合使用。
+
+    Args:
+        nc: 类别数（不含背景）。
+        variant: 模型规模，n / s / m / l / x。
+        anchors: 每个尺度的锚框（像素），默认官方 COCO 锚框。
+        in_channels: 输入通道数。
+        depth_multiple / width_multiple: 若指定则覆盖 variant 中的缩放系数。
+    """
+
+    def __init__(
+        self,
+        nc: int = 80,
+        variant: str = "s",
+        anchors=DEFAULT_ANCHORS,
+        in_channels: int = 3,
+        depth_multiple: float | None = None,
+        width_multiple: float | None = None,
+    ) -> None:
+        super().__init__()
+        if variant not in VARIANTS:
+            raise ValueError(f"未知 variant: {variant}（可选 {', '.join(VARIANTS)}）")
+        gd, gw = VARIANTS[variant]
+        gd = gd if depth_multiple is None else depth_multiple
+        gw = gw if width_multiple is None else width_multiple
+
+        self.variant = variant
+        self.backbone = Backbone(gw, gd, in_channels)
+        self.neck = Neck(*self.backbone.out_channels, gw, gd)
+        self.detect = Detect(nc, self.neck.out_channels, anchors)
+
+    @property
+    def nc(self) -> int:
+        return self.detect.nc
+
+    def forward(self, x: torch.Tensor):
+        return self.detect(list(self.neck(*self.backbone(x))))
 

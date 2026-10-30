@@ -19,6 +19,8 @@ class GhostConv(nn.Module):
         kernel_size: 主卷积核大小，默认 1
         stride: 步幅，默认 1（只作用于主卷积，廉价分支固定为 1）
         ratio: 压缩比，本征特征通道 = ceil(out_channels / ratio)，必须 >= 2，默认 2
+        padding: 主卷积的 padding，默认 None = kernel_size // 2（保证 stride=1 时尺寸不变）。
+            廉价分支的 padding 始终为 dw_kernel_size // 2，与主卷积解耦。
         dw_kernel_size: 廉价深度卷积的核大小，默认 3
         act: 激活函数配置
         bn: 归一化配置
@@ -30,7 +32,7 @@ class GhostConv(nn.Module):
         out_channels: int,
         kernel_size: int = 1,
         stride: int = 1,
-        padding: int = 1,
+        padding: int | None = None,
         ratio: int = 2,
         dw_kernel_size: int = 3,
         act: ActArg = True,
@@ -57,7 +59,7 @@ class GhostConv(nn.Module):
             out_channels=self.identity_num,
             kernel_size=kernel_size,
             stride=stride,
-            padding=padding,
+            padding=kernel_size // 2 if padding is None else padding,
             act=act,
             bn=bn,
         )
@@ -73,7 +75,7 @@ class GhostConv(nn.Module):
             out_channels=self.cheap_num,
             kernel_size=dw_kernel_size,
             stride=1,
-            padding=padding,
+            padding=dw_kernel_size // 2,  # 与主卷积解耦：深度卷积的 padding 由自己的 kernel 决定
             groups=self.identity_num,
             act=act,
             bn=bn,

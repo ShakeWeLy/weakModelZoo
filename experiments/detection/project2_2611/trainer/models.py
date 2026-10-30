@@ -16,9 +16,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.models.detection.YOLO.yolov5 import YOLOv5  # noqa: E402
+from src.models.detection.YOLO.SGC_YOLOv5.sgc_yolov5 import SGC_YOLOv5  # noqa: E402
 
 MODEL_ARCHS: dict[str, Callable[..., nn.Module]] = {
     "yolov5": YOLOv5,
+    "sgc_yolov5": SGC_YOLOv5,
 }
 
 
