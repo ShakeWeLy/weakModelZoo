@@ -89,10 +89,10 @@ class Bottleneck(nn.Module):
                 out_channels,
                 kernel_size=1,
                 stride=1,
-                padding=1,
+                padding=0,
                 ratio=2,
                 groups_ratio=2,
-                dw_kernel_size=3,
+                dw_kernel_size=1,
                 act=F.silu,
                 bn=F.batch_norm,
                 ) -> None:
@@ -110,7 +110,8 @@ class Bottleneck(nn.Module):
                                       dw_kernel_size=dw_kernel_size, act=act, bn=bn)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
         self.DFCAttention = DFCAttention(in_channels)
-        self.DWConv2 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)
+        # 残差支路的深度卷积固定 3×3，不随主卷积 kernel 变化（主卷积已改为 1×1）
+        self.DWConv2 = BaseConv(out_channels, out_channels, 3, stride, groups=out_channels, act=act, bn=bn)
         # self.Conv = BaseConv(in_channels, out_channels, kernel_size, stride, act=act, bn=bn)  # stride=2 分支专用，已注释
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -137,10 +138,10 @@ class SDGhost(nn.Module):
                  n=1,
                  kernel_size=1,
                  stride=1,
-                 padding=1,
+                 padding=0,
                  ratio=2,
                  groups_ratio=2,
-                 dw_kernel_size=3,
+                 dw_kernel_size=1,
                  act=F.silu,
                  bn=F.batch_norm,
                  ) -> None:
@@ -273,19 +274,19 @@ class Backbone(nn.Module):
         self.stem = Conv(3, 64, 6, 2, 2) # [3,224,224] --> [64,112,112]
         self.stage2 = nn.Sequential(
             SGhostConv(64, 128, 3, 2, 1),
-            SDGhost(128, 128, n=3, kernel_size=3, stride=1, padding=1),
+            SDGhost(128, 128, n=3),
         )
         self.stage3 = nn.Sequential(
             SGhostConv(128, 256, 3, 2, 1),
-            SDGhost(256, 256, n=6, kernel_size=3, stride=1, padding=1),
+            SDGhost(256, 256, n=6),
         )
         self.stage4 = nn.Sequential(
             SGhostConv(256, 512, 3, 2, 1),
-            SDGhost(512, 512, n=9, kernel_size=3, stride=1, padding=1),
+            SDGhost(512, 512, n=9),
         )
         self.stage5 = nn.Sequential(
             SGhostConv(512, 1024, 3, 2, 1),
-            SDGhost(1024, 1024, n=3, kernel_size=3, stride=1, padding=1),
+            SDGhost(1024, 1024, n=3),
             SPPF(1024, 1024, 5)
         )
         
