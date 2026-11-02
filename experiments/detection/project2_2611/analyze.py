@@ -33,8 +33,8 @@ from trainer.data import YoloDetDataset, collate_fn, load_dataset_meta  # noqa: 
 from trainer.visualize import render_detections  # noqa: E402
 
 from src.models.detection.YOLO.box import xywh2xyxy  # noqa: E402
-from src.models.detection.YOLO.loss import YOLOv5Loss  # noqa: E402
 from src.models.detection.YOLO.postprocess import non_max_suppression  # noqa: E402
+from trainer.criterion import build_criterion  # noqa: E402
 
 
 def _data_dir(cfg: dict) -> Path:
@@ -68,7 +68,7 @@ def run_analysis(
     model = build_model(cfg, nc).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
-    criterion = YOLOv5Loss(model.detect, cfg["loss"], img_size).to(device)
+    criterion = build_criterion(cfg, model, img_size).to(device)
 
     data_dir = _data_dir(cfg)
     load_dataset_meta(data_dir)  # 校验 data.yaml

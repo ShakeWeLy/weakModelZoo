@@ -16,9 +16,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from src.models.detection.YOLO.loss import YOLOv5Loss
-
 from .config import ROOT
+from .criterion import build_criterion
 from .data import YoloDetDataset, collate_fn, load_dataset_meta
 from .ema import ModelEMA
 from .evaluator import evaluate
@@ -88,7 +87,8 @@ class Trainer:
                                      collate_fn=collate_fn, pin_memory=pin)
 
         self.model = build_model(cfg, self.nc).to(device)
-        self.criterion = YOLOv5Loss(self.model.detect, loss_cfg, self.img_size).to(device)
+        self.criterion = build_criterion(cfg, self.model, self.img_size).to(device)
+        self.loss_names = tuple(getattr(self.criterion, "item_names", ("box", "obj", "cls")))
         self.optimizer = build_optimizer(hp, self.model)
         self.scheduler = build_scheduler(hp, self.optimizer, self.num_epochs)
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -130,9 +130,8 @@ class Trainer:
         log.info(f"数据 train={len(self.train_set)} / val={len(self.val_set)} 图片 | "
                  f"image_size={self.img_size} batch_size={ds['batch_size']} | 类别 nc={self.nc} {self.names}")
         log.info(f"参数量 {count_parameters(self.model) / 1e6:.2f}M")
-        log.info(f"损失 box={self.criterion.box_gain:.4f} obj={self.criterion.obj_gain:.4f} "
-                 f"cls={self.criterion.cls_gain:.4f} | balance={list(self.criterion.balance)} | "
-                 f"anchor_t={self.criterion.anchor_t}")
+        if hasattr(self.criterion, "describe"):
+            log.info(self.criterion.describe())
         log.info(f"优化器 {self.hp.get('optimizer')} lr={self.hp['learning_rate']} "
                  f"momentum={self.hp.get('momentum')} wd={self.hp.get('weight_decay')} | "
                  f"调度 {self.hp.get('lr_scheduler')} | epochs={self.num_epochs}")
@@ -157,7 +156,8 @@ class Trainer:
 
     def _train_epoch(self, epoch: int) -> list[float]:
         self.model.train()
-        sums = torch.zeros(3)
+        n_items = len(self.loss_names)
+        sums = torch.zeros(n_items)
         n = 0
         epoch_lrs = [g["lr"] for g in self.optimizer.param_groups]
         for i, (imgs, targets) in enumerate(self._batches(self.train_loader)):
@@ -167,7 +167,11 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
             with torch.autocast(self.device.type, enabled=self.use_amp):
                 preds = self.model(imgs)
-            loss, items = self.criterion([p.float() for p in preds], targets)
+            # YOLOv5: list[Tensor]；YOLOv8: dict
+            if isinstance(preds, (list, tuple)):
+                loss, items = self.criterion([p.float() for p in preds], targets)
+            else:
+                loss, items = self.criterion(preds, targets)
             self.scaler.scale(loss).backward()
             if self.grad_clip > 0:
                 self.scaler.unscale_(self.optimizer)
@@ -176,23 +180,23 @@ class Trainer:
             self.scaler.update()
             if self.ema is not None:
                 self.ema.update(self.model)
-            sums += items.cpu()
+            sums += items.detach().float().cpu()
             n += 1
         return (sums / max(n, 1)).tolist()
 
     def _log_epoch(self, m: Mapping[str, Any]) -> None:
+        loss_txt = " ".join(f"{name} {m[name]:.4f}" for name in self.loss_names)
         self.log.info(
             f"[E{m['epoch']:03d}/{self.num_epochs}] "
-            f"loss box {m['box']:.4f} obj {m['obj']:.4f} cls {m['cls']:.4f} | val {m['val_loss']:.4f} | "
+            f"loss {loss_txt} | val {m['val_loss']:.4f} | "
             f"mAP50 {m['map50']:.4f} mAP50-95 {m['map']:.4f} P {m['precision']:.4f} R {m['recall']:.4f} | "
             f"lr {m['lr']:.2e} | {m['seconds']:.1f}s"
         )
 
     def _write_epoch_scalars(self, m: Mapping[str, Any], per_class: Mapping[str, float]) -> None:
         epoch, w = m["epoch"], self.writer
-        w.add_scalar("loss/box", m["box"], epoch)
-        w.add_scalar("loss/obj", m["obj"], epoch)
-        w.add_scalar("loss/cls", m["cls"], epoch)
+        for name in self.loss_names:
+            w.add_scalar(f"loss/{name}", m[name], epoch)
         w.add_scalar("loss/val", m["val_loss"], epoch)
         w.add_scalar("metrics/precision", m["precision"], epoch)
         w.add_scalar("metrics/recall", m["recall"], epoch)
@@ -227,7 +231,7 @@ class Trainer:
             for epoch in range(1, self.num_epochs + 1):
                 start = time.time()
                 lr = self.optimizer.param_groups[0]["lr"]
-                box, obj, cls = self._train_epoch(epoch)
+                item_vals = self._train_epoch(epoch)
                 val = evaluate(
                     self.eval_model, self.val_loader, self.device, img_size=self.img_size, names=self.names,
                     criterion=self.criterion, conf_thres=self.conf_thres, iou_thres=self.iou_thres,
@@ -235,7 +239,8 @@ class Trainer:
                 )
                 completed = epoch
                 last = {
-                    "epoch": epoch, "lr": lr, "box": box, "obj": obj, "cls": cls,
+                    "epoch": epoch, "lr": lr,
+                    **dict(zip(self.loss_names, item_vals)),
                     "val_loss": val.get("val_loss", 0.0), "map50": val["map50"], "map": val["map"],
                     "precision": val["precision"], "recall": val["recall"],
                     "seconds": round(time.time() - start, 2),

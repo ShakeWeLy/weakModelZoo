@@ -1,0 +1,26 @@
+# YOLOv8s（Anchor-Free + DFL + Task-Aligned）。未写的键沿用 configs/global.toml。
+# 切换规模：--set model.params.variant=n / m / l / x
+
+[experiments]
+name = "2026-11-02_001_YOLOv8s_V1"
+description = "YOLOv8s from scratch | Det_Fly | Mosaic + flip | SGD 0.01 + warmup + linear | 300 epochs"
+
+[model]
+arch = "yolov8"
+display_name = "YOLOv8"
+
+[model.params]
+variant = "s"                # 规模：n / s / m / l / x
+# reg_max = 16               # DFL bins，默认 16
+
+[loss]
+# 与 ultralytics YOLOv8 默认 hyp 接近；覆盖 global 里的 YOLOv5 损失键
+box = 7.5
+cls = 0.5
+dfl = 1.5
+tal_topk = 10
+tal_alpha = 0.5
+tal_beta = 6.0
+
+[hyperparameters]
+num_epochs = 300

@@ -1,4 +1,4 @@
-"""检测评估：推理 + NMS + TP 匹配 + mAP，训练每 epoch 验证与 eval.py 共用同一套逻辑。"""
+"""检测评估：推理 + NMS + TP 匹配 + mAP，训练每 epoch 验证与 analyze 共用同一套逻辑。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.models.detection.YOLO.box import xywh2xyxy
-from src.models.detection.YOLO.loss import YOLOv5Loss
 from src.models.detection.YOLO.metrics import ap_per_class, process_batch
 from src.models.detection.YOLO.postprocess import non_max_suppression
 
@@ -41,6 +40,13 @@ def summarize_stats(stats: Sequence[tuple[np.ndarray, ...]], names: Sequence[str
     }
 
 
+def _criterion_call(criterion: torch.nn.Module, raw: Any, targets: torch.Tensor):
+    """兼容 YOLOv5 raw=list 与 YOLOv8 raw=dict。"""
+    if isinstance(raw, dict):
+        return criterion(raw, targets)
+    return criterion([r.float() for r in raw], targets)
+
+
 @torch.no_grad()
 def evaluate(
     model: torch.nn.Module,
@@ -49,7 +55,7 @@ def evaluate(
     *,
     img_size: int,
     names: Sequence[str],
-    criterion: YOLOv5Loss | None = None,
+    criterion: torch.nn.Module | None = None,
     conf_thres: float = 0.001,
     iou_thres: float = 0.6,
     max_det: int = 300,
@@ -59,7 +65,8 @@ def evaluate(
     model.eval()
     iouv = torch.linspace(0.5, 0.95, 10, device=device)
     stats: list[tuple[np.ndarray, ...]] = []
-    loss_sum = torch.zeros(3)
+    item_names = tuple(getattr(criterion, "item_names", ("box", "obj", "cls"))) if criterion is not None else ()
+    loss_sum = torch.zeros(len(item_names)) if item_names else None
     n_batches = 0
     num_images = 0
 
@@ -69,9 +76,9 @@ def evaluate(
         with torch.autocast(device.type, enabled=use_amp):
             pred, raw = model(imgs)
 
-        if criterion is not None:
-            _, items = criterion([r.float() for r in raw], targets)
-            loss_sum += items.cpu()
+        if criterion is not None and loss_sum is not None:
+            _, items = _criterion_call(criterion, raw, targets)
+            loss_sum += items.detach().float().cpu()
             n_batches += 1
 
         dets = non_max_suppression(pred.float(), conf_thres, iou_thres, max_det)
@@ -90,7 +97,9 @@ def evaluate(
 
     results = summarize_stats(stats, names)
     results["num_images"] = num_images
-    if criterion is not None and n_batches:
-        box, obj, cls = (loss_sum / n_batches).tolist()
-        results.update(box_loss=box, obj_loss=obj, cls_loss=cls, val_loss=box + obj + cls)
+    if criterion is not None and loss_sum is not None and n_batches:
+        means = (loss_sum / n_batches).tolist()
+        for name, val in zip(item_names, means):
+            results[f"{name}_loss"] = val
+        results["val_loss"] = float(sum(means))
     return results

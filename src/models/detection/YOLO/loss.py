@@ -29,6 +29,8 @@ class YOLOv5Loss(nn.Module):
         img_size: 训练输入尺寸，用于缩放 obj 损失权重（官方按 640 归一化）。
     """
 
+    item_names: tuple[str, ...] = ("box", "obj", "cls")
+
     def __init__(self, detect: Detect, hyp: Mapping[str, Any], img_size: int = 640) -> None:
         super().__init__()
         self.nc, self.nl, self.na = detect.nc, detect.nl, detect.na
@@ -48,6 +50,12 @@ class YOLOv5Loss(nn.Module):
         self.register_buffer("anchors_grid", anchors_grid)
         self.register_buffer("cls_pw", torch.tensor([float(hyp.get("cls_pw", 1.0))]))
         self.register_buffer("obj_pw", torch.tensor([float(hyp.get("obj_pw", 1.0))]))
+
+    def describe(self) -> str:
+        return (
+            f"损失 box={self.box_gain:.4f} obj={self.obj_gain:.4f} cls={self.cls_gain:.4f} | "
+            f"balance={list(self.balance)} | anchor_t={self.anchor_t}"
+        )
 
     def _bce(self, logits: torch.Tensor, target: torch.Tensor, pos_weight: torch.Tensor) -> torch.Tensor:
         return F.binary_cross_entropy_with_logits(logits, target, pos_weight=pos_weight)
