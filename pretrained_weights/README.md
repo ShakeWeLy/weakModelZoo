@@ -11,6 +11,8 @@ pretrained_weights/
 ├── resnet/
 │   ├── resnet18-f37072fd.pth      # 已从本机 torch hub 复制
 │   └── resnet34-b627a593.pth
+├── siamprnpp/
+│   └── siamese_rpn_r50_1x_lasot_20201218_051019-3c522eff.pth  # MMTracking R50 SiamRPN
 ├── swin/
 │   └── swin_tiny_patch4_window7_224.pth   # Swin-UNet 官方 ImageNet 预训练
 ├── transunet/
@@ -29,6 +31,14 @@ cp /path/to/resnet34-b627a593.pth pretrained_weights/resnet/
 ```
 
 官方：https://download.pytorch.org/models/resnet34-b627a593.pth
+
+## SiamSPN++（MMTracking R50 SiamRPN）
+
+`SiamSPN_pp(pretrained=True)` **只**加载本目录下的整网权重（非 ImageNet 分类 ResNet）：
+
+```text
+pretrained_weights/siamprnpp/siamese_rpn_r50_1x_lasot_20201218_051019-3c522eff.pth
+```
 
 ## SAM3（ModelScope）
 
