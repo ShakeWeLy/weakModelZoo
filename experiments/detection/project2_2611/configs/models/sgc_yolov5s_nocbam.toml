@@ -1,0 +1,16 @@
+# 消融 1：SGC-YOLOv5s 去掉输出前 CBAM。其余结构与 SGC 相同。
+# 对照基线：SGC_YOLOv5s_V4 / YOLOv5s_V3
+
+[experiments]
+name = "2026-11-03_001_SGC_NoCBAM_s_V1"
+description = "Ablation: SGC-YOLOv5s without CBAM | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5_nocbam"
+display_name = "SGC_YOLOv5_NoCBAM"
+
+[model.params]
+variant = "s"
+
+[hyperparameters]
+num_epochs = 40

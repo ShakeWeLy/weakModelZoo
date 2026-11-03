@@ -1,0 +1,16 @@
+# 消融 2：SGC Neck 中 VOVGCSP -> 标准 C3；保留 GSConv 与 CBAM。
+# 对照基线：SGC_YOLOv5s_V4 / YOLOv5s_V3
+
+[experiments]
+name = "2026-11-03_002_SGC_C3Neck_s_V1"
+description = "Ablation: SGC-YOLOv5s Neck VOVGCSP->C3 | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5_c3neck"
+display_name = "SGC_YOLOv5_C3Neck"
+
+[model.params]
+variant = "s"
+
+[hyperparameters]
+num_epochs = 40

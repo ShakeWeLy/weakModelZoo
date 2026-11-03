@@ -1,0 +1,16 @@
+# 消融 3：Backbone 浅层 stage2/3 用标准 Conv+C3；深层与 Neck 仍为 SGC。
+# 对照基线：SGC_YOLOv5s_V4 / YOLOv5s_V3
+
+[experiments]
+name = "2026-11-03_003_SGC_StdEarly_s_V1"
+description = "Ablation: SGC-YOLOv5s early backbone Conv+C3 | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5_stdearly"
+display_name = "SGC_YOLOv5_StdEarly"
+
+[model.params]
+variant = "s"
+
+[hyperparameters]
+num_epochs = 40
