@@ -30,7 +30,7 @@ from trainer import (  # noqa: E402
 )
 from trainer.config import ROOT  # noqa: E402
 from trainer.data import YoloDetDataset, collate_fn, load_dataset_meta  # noqa: E402
-from trainer.visualize import render_detections  # noqa: E402
+from trainer.visualize import plot_metric_curves, plot_results_from_tensorboard, render_detections  # noqa: E402
 
 from src.models.detection.YOLO.box import xywh2xyxy  # noqa: E402
 from src.models.detection.YOLO.postprocess import non_max_suppression  # noqa: E402
@@ -83,10 +83,14 @@ def run_analysis(
             conf_thres=float(test_cfg.get("conf_thres", 0.001)),
             iou_thres=float(test_cfg.get("iou_thres", 0.6)),
             max_det=int(test_cfg.get("max_det", 300)),
+            with_curves=True,
         )
         results[split] = m
         out_dir = rec.predictions_dir / split
         out_dir.mkdir(parents=True, exist_ok=True)
+        # metrics.json 只写标量，曲线数组另存图
+        curves = m.pop("curves", None)
+        confusion = m.pop("confusion", None)
         (out_dir / "metrics.json").write_text(
             json.dumps({"split": split, "checkpoint": kind, "epoch": ckpt.get("epoch"), **m},
                        ensure_ascii=False, indent=2),
@@ -100,22 +104,32 @@ def run_analysis(
         for name, ap in m["per_class_ap50"].items():
             log.info(f"  AP50 {name}: {ap:.4f}")
 
-        if do_vis and vis_num > 0:
+        if do_vis:
             vis_dir = out_dir / "visualizations"
             vis_dir.mkdir(exist_ok=True)
-            vis_conf = float(test_cfg.get("vis_conf_thres", 0.25))
-            for i in range(min(vis_num, len(ds))):
-                img_t, lab = ds[i]
-                with torch.no_grad():
-                    pred, _ = model(img_t[None].to(device).float() / 255.0)
-                det = non_max_suppression(pred, vis_conf, float(test_cfg.get("iou_thres", 0.6)),
-                                          int(test_cfg.get("max_det", 300)))[0].cpu().numpy()
-                gt = xywh2xyxy(lab[:, 1:5]).numpy() * img_size
-                rgb = img_t.permute(1, 2, 0).numpy()
-                bgr = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2BGR)
-                canvas = render_detections(bgr, gt, det, names, vis_conf)
-                cv2.imwrite(str(vis_dir / f"{ds.paths[i].stem}.png"), canvas)
-            log.info(f"  可视化 {min(vis_num, len(ds))} 张 -> {vis_dir}")
+            if curves is not None:
+                saved = plot_metric_curves(curves, confusion, vis_dir)
+                log.info(f"  指标图 {len(saved)} 张 -> {vis_dir}")
+            if vis_num > 0:
+                vis_conf = float(test_cfg.get("vis_conf_thres", 0.25))
+                for i in range(min(vis_num, len(ds))):
+                    img_t, lab = ds[i]
+                    with torch.no_grad():
+                        pred, _ = model(img_t[None].to(device).float() / 255.0)
+                    det = non_max_suppression(pred, vis_conf, float(test_cfg.get("iou_thres", 0.6)),
+                                              int(test_cfg.get("max_det", 300)))[0].cpu().numpy()
+                    gt = xywh2xyxy(lab[:, 1:5]).numpy() * img_size
+                    rgb = img_t.permute(1, 2, 0).numpy()
+                    bgr = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2BGR)
+                    canvas = render_detections(bgr, gt, det, names, vis_conf)
+                    cv2.imwrite(str(vis_dir / f"{ds.paths[i].stem}.png"), canvas)
+                log.info(f"  检测可视化 {min(vis_num, len(ds))} 张 -> {vis_dir}")
+
+    # 训练曲线总览（类似官方 results.png）
+    if do_vis:
+        results_png = plot_results_from_tensorboard(rec.tensorboard_dir, rec.run_dir / "results.png")
+        if results_png is not None:
+            log.info(f"训练结果图 -> {results_png}")
 
     rec.close_logger()
     return results

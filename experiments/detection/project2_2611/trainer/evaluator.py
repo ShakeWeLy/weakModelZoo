@@ -9,12 +9,21 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.models.detection.YOLO.box import xywh2xyxy
-from src.models.detection.YOLO.metrics import ap_per_class, process_batch
+from src.models.detection.YOLO.metrics import ap_per_class, confusion_matrix, process_batch
 from src.models.detection.YOLO.postprocess import non_max_suppression
 
 
-def summarize_stats(stats: Sequence[tuple[np.ndarray, ...]], names: Sequence[str]) -> dict[str, Any]:
-    """把逐图统计汇总为 mAP / P / R。stats 元素为 (correct, conf, pred_cls, target_cls)。"""
+def summarize_stats(
+    stats: Sequence[tuple[np.ndarray, ...]],
+    names: Sequence[str],
+    *,
+    with_curves: bool = False,
+    conf_thres_cm: float = 0.25,
+) -> dict[str, Any]:
+    """把逐图统计汇总为 mAP / P / R。stats 元素为 (correct, conf, pred_cls, target_cls)。
+
+    with_curves=True 时额外返回 curves（PR/F1/P/R）与 confusion（含 background）。
+    """
     empty = {"precision": 0.0, "recall": 0.0, "map50": 0.0, "map": 0.0, "per_class_ap50": {}}
     if not stats:
         return empty
@@ -31,13 +40,31 @@ def summarize_stats(stats: Sequence[tuple[np.ndarray, ...]], names: Sequence[str
         names[int(c)] if int(c) < len(names) else str(int(c)): float(ap[i, 0])
         for i, c in enumerate(res["classes"])
     }
-    return {
+    out: dict[str, Any] = {
         "precision": float(res["precision"].mean()),
         "recall": float(res["recall"].mean()),
         "map50": float(ap[:, 0].mean()),
         "map": float(ap.mean()),
         "per_class_ap50": per_class,
     }
+    if with_curves:
+        class_names = [
+            names[int(c)] if int(c) < len(names) else str(int(c)) for c in res["classes"]
+        ]
+        out["curves"] = {
+            "names": class_names,
+            "px": res["px"],
+            "py": res["py"],
+            "p_curve": res["p_curve"],
+            "r_curve": res["r_curve"],
+            "f1_curve": res["f1_curve"],
+            "conf_curve": res["conf_curve"],
+            "ap50": ap[:, 0],
+        }
+        out["confusion"] = confusion_matrix(
+            tp, conf, pred_cls, target_cls, nc=len(names), conf_thres=conf_thres_cm
+        )
+    return out
 
 
 def _criterion_call(criterion: torch.nn.Module, raw: Any, targets: torch.Tensor):
@@ -60,8 +87,12 @@ def evaluate(
     iou_thres: float = 0.6,
     max_det: int = 300,
     use_amp: bool = False,
+    with_curves: bool = False,
 ) -> dict[str, Any]:
-    """在 loader 上计算 mAP@0.5、mAP@0.5:0.95、P、R；若给定 criterion 则同时统计验证损失。"""
+    """在 loader 上计算 mAP@0.5、mAP@0.5:0.95、P、R；若给定 criterion 则同时统计验证损失。
+
+    with_curves=True 时额外返回 curves / confusion，供官方风格指标图使用。
+    """
     model.eval()
     iouv = torch.linspace(0.5, 0.95, 10, device=device)
     stats: list[tuple[np.ndarray, ...]] = []
@@ -95,7 +126,7 @@ def evaluate(
             ))
             num_images += 1
 
-    results = summarize_stats(stats, names)
+    results = summarize_stats(stats, names, with_curves=with_curves)
     results["num_images"] = num_images
     if criterion is not None and loss_sum is not None and n_batches:
         means = (loss_sum / n_batches).tolist()
