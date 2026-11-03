@@ -1,18 +1,18 @@
-"""SiamSPN++：基于深层骨干 + 多层 depthwise 互相关 RPN 的孪生跟踪器。
+"""SiamRPN++：基于深层骨干 + 多层 depthwise 互相关 RPN 的孪生跟踪器。
 
 结构对齐 SiamRPN++（CVPR 2019 / pysot）::
 
     Backbone (ResNet-50 atrous) → AdjustAllLayer → MultiRPN (weighted)
 
 默认加载 MMTracking 整网预训练
-（``pretrained_weights/siamprnpp/siamese_rpn_r50_1x_lasot_*.pth``），
+（``pretrained_weights/siamrpnpp/siamese_rpn_r50_1x_lasot_*.pth``），
 不再使用原生 ImageNet ResNet 部分加载。
 
 用法::
 
-    from src.models.track.SiamSPN import SiamSPN_pp, SiamSPNLoss
-    model = SiamSPN_pp()  # 默认加载 MMTracking 权重
-    criterion = SiamSPNLoss()
+    from src.models.track.SiamRPN import SiamRPN_pp, SiamRPNLoss
+    model = SiamRPN_pp()  # 默认加载 MMTracking 权重
+    criterion = SiamRPNLoss()
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ from typing import Sequence
 import torch
 import torch.nn as nn
 
-from src.models.track.SiamSPN.backbone import ResNetAtrous, resnet50
-from src.models.track.SiamSPN.common import AdjustAllLayer, MultiRPN
-from src.models.track.SiamSPN.load_mmtrack import DEFAULT_MMTRACK_WEIGHTS, load_mmtrack_checkpoint
+from src.models.track.SiamRPN.backbone import ResNetAtrous, resnet50
+from src.models.track.SiamRPN.common import AdjustAllLayer, MultiRPN
+from src.models.track.SiamRPN.load_mmtrack import DEFAULT_MMTRACK_WEIGHTS, load_mmtrack_checkpoint
 
 # 默认：5 个 ratios × 1 个 scale
 DEFAULT_ANCHOR_NUM = 5
@@ -33,8 +33,8 @@ DEFAULT_USED_LAYERS: tuple[int, ...] = (2, 3, 4)
 DEFAULT_ADJUST_CHANNELS: tuple[int, ...] = (256, 256, 256)
 
 
-class SiamSPN_pp(nn.Module):
-    """SiamSPN++ 主网络。
+class SiamRPN_pp(nn.Module):
+    """SiamRPN++ 主网络。
 
     Args:
         anchor_num: 每个位置的锚框数（默认 5）。

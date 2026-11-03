@@ -1,4 +1,4 @@
-"""加载 MMTracking Siamese RPN (ResNet-50) 权重到 SiamSPN_pp。
+"""加载 MMTracking Siamese RPN (ResNet-50) 权重到 SiamRPN_pp。
 
 适用于如 ``siamese_rpn_r50_1x_lasot_*.pth``（meta.mmtrack_version 存在）。
 键名映射：
@@ -17,12 +17,12 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-# 仓库根 / pretrained_weights/siamprnpp/
+# 仓库根 / pretrained_weights/siamrpnpp/
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_MMTRACK_WEIGHTS = (
     _REPO_ROOT
     / "pretrained_weights"
-    / "siamprnpp"
+    / "siamrpnpp"
     / "siamese_rpn_r50_1x_lasot_20201218_051019-3c522eff.pth"
 )
 
@@ -101,7 +101,7 @@ def load_mmtrack_checkpoint(
     if not path.is_file():
         raise FileNotFoundError(
             f"MMTracking 权重不存在: {path}\n"
-            f"请放到 pretrained_weights/siamprnpp/siamese_rpn_r50_1x_lasot_*.pth"
+            f"请放到 pretrained_weights/siamrpnpp/siamese_rpn_r50_1x_lasot_*.pth"
         )
     raw = torch.load(path, map_location="cpu", weights_only=False)
     state = raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw

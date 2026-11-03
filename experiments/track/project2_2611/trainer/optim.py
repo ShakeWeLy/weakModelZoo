@@ -8,12 +8,12 @@ from typing import Any, Mapping
 import torch
 from torch import nn
 
-from src.models.track.SiamSPN import SiamSPN_pp
+from src.models.track.SiamRPN import SiamRPN_pp
 
 
 def build_optimizer(
     hp: Mapping[str, Any],
-    model: SiamSPN_pp,
+    model: SiamRPN_pp,
     *,
     train_backbone: bool,
 ) -> torch.optim.Optimizer:

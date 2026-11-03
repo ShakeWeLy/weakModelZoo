@@ -7,13 +7,13 @@ from typing import Any, Callable, Mapping
 
 import torch.nn as nn
 
-from src.models.track.SiamSPN import SiamSPN_pp
-from src.models.track.SiamSPN.load_mmtrack import DEFAULT_MMTRACK_WEIGHTS
+from src.models.track.SiamRPN import SiamRPN_pp
+from src.models.track.SiamRPN.load_mmtrack import DEFAULT_MMTRACK_WEIGHTS
 
 from .config import ROOT
 
 MODEL_ARCHS: dict[str, Callable[..., nn.Module]] = {
-    "siamspn_pp": SiamSPN_pp,
+    "siamrpn_pp": SiamRPN_pp,
 }
 
 

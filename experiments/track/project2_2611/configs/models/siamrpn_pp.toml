@@ -1,0 +1,22 @@
+# SiamRPN++。未写的键沿用 configs/global.toml。
+
+[experiments]
+name = ""
+description = "SiamRPN++ | Anti-UAV | MMTracking R50 SiamRPN pretrained | freeze backbone then fine-tune"
+
+[model]
+arch = "siamrpn_pp"
+display_name = "SiamRPN_pp"
+
+[model.params]
+# 传给 SiamRPN_pp(**params)
+anchor_num = 5
+weighted = true
+pretrained = true
+# weights_path 留空则用 DEFAULT_MMTRACK_WEIGHTS
+# weights_path = "pretrained_weights/siamrpnpp/siamese_rpn_r50_1x_lasot_20201218_051019-3c522eff.pth"
+
+[hyperparameters]
+num_epochs = 20
+freeze_backbone_epochs = 10
+learning_rate = 0.003

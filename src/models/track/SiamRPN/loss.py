@@ -1,4 +1,4 @@
-"""SiamSPN++ 损失：均衡正负样本的分类 NLL + 加权 L1 回归。
+"""SiamRPN++ 损失：均衡正负样本的分类 NLL + 加权 L1 回归。
 
 对齐 pysot ``models/loss.py``（select_cross_entropy_loss + weight_l1_loss）。
 
@@ -53,8 +53,8 @@ def weight_l1_loss(
     return (diff * loss_weight).sum() / b
 
 
-class SiamSPNLoss(nn.Module):
-    """SiamSPN++ 联合损失。
+class SiamRPNLoss(nn.Module):
+    """SiamRPN++ 联合损失。
 
     Args:
         hyp: 可选超参，键 ``cls`` / ``loc`` 为两项权重（默认 1.0 / 1.2）。

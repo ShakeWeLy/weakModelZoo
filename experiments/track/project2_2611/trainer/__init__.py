@@ -1,4 +1,4 @@
-"""project2_2611 跟踪训练框架（SiamSPN++ / Anti-UAV）。"""
+"""project2_2611 跟踪训练框架（SiamRPN++ / Anti-UAV）。"""
 
 from .config import PROJECT_DIR, ROOT, available_models, build_config, model_output_dir
 from .models import build_model, count_parameters

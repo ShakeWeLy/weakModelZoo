@@ -1,4 +1,4 @@
-"""SiamSPN++ 训练器：孪生对训练 / 可选 val loss / 主干冻结 / checkpoint。"""
+"""SiamRPN++ 训练器：孪生对训练 / 可选 val loss / 主干冻结 / checkpoint。"""
 
 from __future__ import annotations
 

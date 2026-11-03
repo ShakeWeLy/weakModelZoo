@@ -21,7 +21,7 @@ def xcorr_fast(x: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
 
 
 def xcorr_depthwise(x: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
-    """逐通道 depthwise 互相关（SiamRPN++ / SiamSPN++ 默认）。
+    """逐通道 depthwise 互相关（SiamRPN++ 默认）。
 
     Args:
         x: 搜索特征 ``(B, C, H, W)``

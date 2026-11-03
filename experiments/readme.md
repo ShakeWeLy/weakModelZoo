@@ -5,7 +5,7 @@ source ~/envs/train_/bin/activate
 python experiments/segment/project1_2610/train.py -m unet --epochs 150
 python experiments/detection/project2_2611/train.py -m sgc_yolov5s
 
-python experiments/track/project2_2611/train.py -m siamspn_pp
+python experiments/track/project2_2611/train.py -m siamrpn_pp
 
 
 

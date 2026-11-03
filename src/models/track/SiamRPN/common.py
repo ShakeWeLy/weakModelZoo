@@ -1,4 +1,4 @@
-"""SiamSPN++ 基础模块：Adjust 通道对齐、DepthwiseXCorr、DepthwiseRPN、MultiRPN。
+"""SiamRPN++ 基础模块：Adjust 通道对齐、DepthwiseXCorr、DepthwiseRPN、MultiRPN。
 
 对齐 pysot ``models/neck`` + ``models/head/rpn`` 中 SiamRPN++ 的实现。
 """
@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.track.SiamSPN.xcorr import xcorr_depthwise, xcorr_fast
+from src.models.track.SiamRPN.xcorr import xcorr_depthwise, xcorr_fast
 
 
 class AdjustLayer(nn.Module):
@@ -122,7 +122,7 @@ class UPChannelRPN(nn.Module):
 
 
 class MultiRPN(nn.Module):
-    """多层 DepthwiseRPN + 等权 / 可学习加权融合（SiamSPN++ / SiamRPN++）。"""
+    """多层 DepthwiseRPN + 等权 / 可学习加权融合（SiamRPN++）。"""
 
     def __init__(
         self,

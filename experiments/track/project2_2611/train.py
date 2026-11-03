@@ -2,10 +2,9 @@
 
 用法（在仓库根目录执行）::
 
-    python experiments/track/project2_2611/train.py -m siamspn_pp --quick -n _smoke
-    python experiments/track/project2_2611/train.py -m siamspn_pp \\
-        --set dataset.data_dir=data/Anti-UAV --epochs 20
-    python experiments/track/project2_2611/train.py -m siamspn_pp \\
+    python experiments/track/project2_2611/train.py -m siamrpn_pp
+    python experiments/track/project2_2611/train.py -m siamrpn_pp --epochs 20
+    python experiments/track/project2_2611/train.py -m siamrpn_pp \\
         --set model.params.pretrained=false -n from_scratch
 """
 

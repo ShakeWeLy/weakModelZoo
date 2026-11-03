@@ -7,7 +7,7 @@ from typing import Sequence
 import numpy as np
 import torch
 
-from src.models.track.SiamSPN.box import Anchors, encode_bbox
+from src.models.track.SiamRPN.box import Anchors, encode_bbox
 
 
 def _iou_xyxy(a: np.ndarray, b: np.ndarray) -> np.ndarray:

@@ -1,7 +1,7 @@
 """跟踪专用 ResNet（atrous）：layer3/4 用 dilation 保持较大特征图。
 
 对齐 pysot ``models/backbone/resnet_atrous.py``，默认输出 layer2/3/4 供多层 RPN 使用。
-权重由上层 ``SiamSPN_pp`` 通过 MMTracking 整网 checkpoint 加载，本模块不做 ImageNet 初始化。
+权重由上层 ``SiamRPN_pp`` 通过 MMTracking 整网 checkpoint 加载，本模块不做 ImageNet 初始化。
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ class ResNetAtrous(nn.Module):
 
     ``used_layers`` 索引约定（与 pysot 一致）::
         0: stem(relu 后), 1: layer1, 2: layer2, 3: layer3, 4: layer4
-    SiamSPN++ 默认 ``(2, 3, 4)``，通道分别为 512 / 1024 / 2048。
+    SiamRPN++ 默认 ``(2, 3, 4)``，通道分别为 512 / 1024 / 2048。
     """
 
     def __init__(
