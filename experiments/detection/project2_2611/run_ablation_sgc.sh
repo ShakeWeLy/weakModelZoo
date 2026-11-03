@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
+  sgc_yolov5s
   sgc_yolov5s_nocbam
   sgc_yolov5s_c3neck
   sgc_yolov5s_stdearly
