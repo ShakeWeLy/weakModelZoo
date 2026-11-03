@@ -35,6 +35,9 @@ def crop_square(
     y1 = int(round(cy - half))
     x2 = int(round(cx + half))
     y2 = int(round(cy + half))
+    # round 可能导致宽高差 1，以实际裁剪窗为准
+    out_h = max(1, y2 - y1)
+    out_w = max(1, x2 - x1)
 
     left = max(0, -x1)
     top = max(0, -y1)
@@ -44,16 +47,17 @@ def crop_square(
     x1c, y1c = x1 + left, y1 + top
     x2c, y2c = x2 - right, y2 - bottom
     patch = image[y1c:y2c, x1c:x2c]
+    ph, pw = patch.shape[:2]
 
     if image.ndim == 2:
         mean = float(image.mean()) if image.size else 0.0
-        canvas = np.full((int(round(original_sz)), int(round(original_sz))), mean, dtype=image.dtype)
-        canvas[top : top + patch.shape[0], left : left + patch.shape[1]] = patch
+        canvas = np.full((out_h, out_w), mean, dtype=image.dtype)
     else:
         mean = image.mean(axis=(0, 1)) if image.size else np.zeros(image.shape[2], dtype=np.float64)
-        canvas = np.empty((int(round(original_sz)), int(round(original_sz)), image.shape[2]), dtype=image.dtype)
+        canvas = np.empty((out_h, out_w, image.shape[2]), dtype=image.dtype)
         canvas[:] = mean
-        canvas[top : top + patch.shape[0], left : left + patch.shape[1]] = patch
+    # 防止 pad 与 patch 尺寸因取整不一致
+    canvas[top : top + ph, left : left + pw] = patch[: min(ph, out_h - top), : min(pw, out_w - left)]
 
     out = cv2.resize(canvas, (model_sz, model_sz), interpolation=cv2.INTER_LINEAR)
     return out, scale

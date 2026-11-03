@@ -29,9 +29,26 @@ _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv"}
 
 # (模态偏好关键字, json 名候选)
 _MODALITY_HINTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "ir": (("ir", "thermal"), ("IR.json", "IR_label.json", "ir.json", "label.json")),
-    "rgb": (("rgb", "visible", "vis"), ("visible.json", "RGB.json", "rgb.json", "visible_label.json")),
+    "ir": (
+        ("infrared", "ir", "thermal"),
+        ("infrared.json", "IR.json", "IR_label.json", "ir.json", "label.json"),
+    ),
+    "rgb": (
+        ("visible", "rgb", "vis"),
+        ("visible.json", "RGB.json", "rgb.json", "visible_label.json"),
+    ),
 }
+
+
+def _is_ir_name(name: str) -> bool:
+    """``infrared`` 不含连续子串 ``ir``，需按词判断。"""
+    low = name.lower()
+    return low in {"ir", "thermal"} or low.startswith(("infrared", "ir_", "ir-"))
+
+
+def _is_rgb_name(name: str) -> bool:
+    low = name.lower()
+    return low in {"rgb", "vis"} or low.startswith(("visible", "rgb", "vis_"))
 
 
 @dataclass
@@ -106,12 +123,11 @@ def _pick_json(seq_dir: Path, modality: Modality) -> Path | None:
     for name in order:
         if name in by_name:
             return by_name[name]
-    # 回退：名字里含 ir / visible 的
+    # 回退：按 infrared / visible 词判断
     for p in jsons:
-        low = p.stem.lower()
-        if modality == "ir" and "ir" in low:
+        if modality == "ir" and _is_ir_name(p.stem):
             return p
-        if modality == "rgb" and ("vis" in low or "rgb" in low):
+        if modality == "rgb" and _is_rgb_name(p.stem):
             return p
     return jsons[0] if modality == "auto" else None
 
@@ -125,29 +141,29 @@ def _pick_media(seq_dir: Path, modality: Modality, json_path: Path) -> tuple[lis
         if d.is_dir():
             imgs = _list_images(d)
             if imgs:
-                mod = "ir" if "ir" in d.name.lower() else "rgb"
+                mod = "ir" if _is_ir_name(d.name) else "rgb"
                 return imgs, None, mod
 
     # 2) 常见目录名
     names = []
     if modality in ("ir", "auto"):
-        names += ["IR", "ir", "thermal"]
+        names += ["infrared", "IR", "ir", "thermal"]
     if modality in ("rgb", "auto"):
-        names += ["RGB", "rgb", "visible", "Visible", "vis"]
+        names += ["visible", "Visible", "RGB", "rgb", "vis"]
     for name in names:
         d = seq_dir / name
         if d.is_dir():
             imgs = _list_images(d)
             if imgs:
-                mod = "ir" if name.lower() in {"ir", "thermal"} else "rgb"
+                mod = "ir" if _is_ir_name(name) else "rgb"
                 return imgs, None, mod
 
     # 3) 视频文件
-    for name in [stem, stem.upper(), stem.lower(), "IR", "visible", "RGB"]:
+    for name in [stem, stem.upper(), stem.lower(), "infrared", "IR", "visible", "RGB"]:
         for ext in _VIDEO_EXTS:
             vp = seq_dir / f"{name}{ext}"
             if vp.is_file():
-                mod = "ir" if "ir" in name.lower() else "rgb"
+                mod = "ir" if _is_ir_name(name) else "rgb"
                 return None, vp, mod
 
     # 4) 序列目录下直接放图

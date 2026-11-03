@@ -1,0 +1,70 @@
+# 全局配置：所有跟踪模型共享。configs/models/<model>.toml 中的同名键会覆盖这里的值。
+# 合并顺序: global → model → global.[quick] → model.[quick]（仅 --quick）→ CLI --epochs / --set
+
+[experiments]
+runs_dir = "runs"
+date = ""
+name = ""
+description = ""
+
+[dataset]
+# Anti-UAV 根目录（相对仓库根或绝对路径）；内含 train/ 等 split 与序列 JSON
+data_dir = "data/AntiUAV"
+modality = "ir"                # ir / rgb / auto
+splits = ["train"]
+val_splits = ["val"]           # 若目录不存在则跳过验证
+pairs_per_epoch = 60000
+batch_size = 8
+num_workers = 4
+exemplar_size = 127
+search_size = 255
+context_amount = 0.5
+max_frame_gap = 100
+search_shift = 0.2
+score_size = 25
+stride = 8
+pos_thr = 0.6
+neg_thr = 0.3
+
+[hyperparameters]
+optimizer = "sgd"              # sgd / adam / adamw
+learning_rate = 0.003
+backbone_lr_mult = 0.1         # 解冻后主干 lr = learning_rate * backbone_lr_mult
+momentum = 0.9
+weight_decay = 0.0001
+num_epochs = 20
+freeze_backbone_epochs = 10    # 前 N 个 epoch 冻结 backbone
+lr_scheduler = "none"          # none / linear / cosine
+lr_final_factor = 0.1
+grad_clip_norm = 10.0          # 0 = 关闭
+
+[loss]
+cls = 1.0
+loc = 1.2
+
+[train]
+device = "cuda"
+seed = 42
+amp = false
+limit_batches = 0              # 调试：每 epoch 前 N 个 batch；0 = 完整
+print_freq = 50
+early_stopping = false
+early_stopping_patience = 10
+early_stopping_min_delta = 0.0
+
+[test]
+device = "cuda"
+checkpoint = "best"            # best（最低 train/val loss）/ last
+splits = ["val"]
+
+[quick.hyperparameters]
+num_epochs = 1
+
+[quick.dataset]
+pairs_per_epoch = 16
+batch_size = 2
+num_workers = 0
+
+[quick.train]
+limit_batches = 2
+print_freq = 1
