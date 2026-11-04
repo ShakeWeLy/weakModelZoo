@@ -13,7 +13,13 @@ from src.models.detection.YOLO.yolov8_loss import YOLOv8Loss
 def build_criterion(cfg: Mapping[str, Any], model: nn.Module, img_size: int) -> nn.Module:
     arch = str(cfg["model"]["arch"]).lower()
     hyp = cfg["loss"]
-    if arch in {"yolov5", "sgc_yolov5"}:
+    if arch in {
+        "yolov5",
+        "sgc_yolov5",
+        "sgc_yolov5_nocbam",
+        "sgc_yolov5_c3neck",
+        "sgc_yolov5_stdearly",
+    }:
         return YOLOv5Loss(model.detect, hyp, img_size)
     if arch == "yolov8":
         return YOLOv8Loss(model.detect, hyp, img_size)
