@@ -1,0 +1,17 @@
+# YOLOv5m。未写的键沿用 configs/global.toml。
+# 与 yolov5s / sgc_yolov5s(m) 对比时可用同一套 epoch。
+
+[experiments]
+name = "2026-11-04_001_YOLOv5m_V1"
+description = "YOLOv5m from scratch | Det_Fly | Mosaic + flip | SGD 0.01 + warmup + linear | 50 epochs"
+
+[model]
+arch = "yolov5"
+display_name = "YOLOv5"
+
+[model.params]
+variant = "m"                # 规模：n / s / m / l / x
+
+[hyperparameters]
+num_epochs = 50
+# anchors = [[10,13,16,30,33,23],[30,61,62,45,59,119],[116,90,156,198,373,326]]  # 留空则用官方默认锚框

@@ -1,0 +1,21 @@
+# SGC-YOLOv5m。未写的键沿用 configs/global.toml。
+# m 规模易 AMP NaN：默认关 AMP，并把 lr 降到 0.005。
+
+[experiments]
+name = "2026-11-04_001_SGC_YOLOv5m_V1"
+description = "SGC-YOLOv5m from scratch | Det_Fly | Mosaic + flip | SGD 0.005 + no AMP + warmup + linear | 50 epochs"
+
+[train]
+amp = false
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5"
+
+[model.params]
+variant = "m"
+
+[hyperparameters]
+num_epochs = 50
+learning_rate = 0.005
+# anchors = [[10,13,16,30,33,23],[30,61,62,45,59,119],[116,90,156,198,373,326]]
