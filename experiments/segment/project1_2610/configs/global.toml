@@ -18,7 +18,7 @@ val_holdout_cases = 2        # 从 train.txt 按病例随机留出的验证病�
 split_seed = 42              # 病例划分的随机种子
 image_size = 224             # 网络输入分辨率（需满足所选模型的整除约束）
 batch_size = 16
-num_workers = 1              # DataLoader 子进程数；0 = 在主进程中加载
+num_workers = 24              # DataLoader 子进程数；0 = 在主进程中加载
 augment = true               # 开关：训练集数据增强（rot90+flip 或 ±20° 旋转）；验证/测试集不增强
 
 [hyperparameters]

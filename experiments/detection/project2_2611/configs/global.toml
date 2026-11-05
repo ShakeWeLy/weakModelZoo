@@ -16,7 +16,7 @@ description = ""
 data_dir = "data/Det_Fly"
 image_size = 640             # 网络输入边长（letterbox 后的正方形尺寸），需为 32 的倍数
 batch_size = 16
-num_workers = 16             # DataLoader 子进程数；服务器（多核+4090）可用 8~16。Windows 本地请 --set dataset.num_workers=0
+num_workers = 24             # DataLoader 子进程数；服务器（多核+4090）可用 8~16。Windows 本地请 --set dataset.num_workers=0
 augment = true               # 开关：训练增强总开关；关闭时训练也只做 letterbox
 mosaic_prob = 1.0            # Mosaic 增强概率（需 augment=true）；0 = 关闭
 fliplr = 0.5                 # 水平翻转概率（需 augment=true）；0 = 关闭
