@@ -270,29 +270,41 @@ class CBAM(nn.Module):
 
 
 class Backbone(nn.Module):
-    def __init__(self, gw: float = 1.0, gd: float = 1.0, in_channels: int = 3) -> None:
+    def __init__(
+        self,
+        gw: float = 1.0,
+        gd: float = 1.0,
+        in_channels: int = 3,
+        *,
+        ratio: int = 2,
+        groups_ratio: int = 2,
+        kernel_size: int = 1,
+        dw_kernel_size: int = 1,
+    ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
+        ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
+        block_kw = dict(kernel_size=kernel_size, ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
         self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
         self.stage2 = nn.Sequential(  # P2/4
-            SGhostConv(s.c(64), s.c(128), 3, 2, 1),
-            SDGhost(s.c(128), s.c(128), n=s.n(3)),
+            SGhostConv(s.c(64), s.c(128), 3, 2, 1, **ghost_kw),
+            SDGhost(s.c(128), s.c(128), n=s.n(3), **block_kw),
         )
         self.stage3 = nn.Sequential(  # P3/8
-            SGhostConv(s.c(128), s.c(256), 3, 2, 1),
-            SDGhost(s.c(256), s.c(256), n=s.n(6)),
+            SGhostConv(s.c(128), s.c(256), 3, 2, 1, **ghost_kw),
+            SDGhost(s.c(256), s.c(256), n=s.n(6), **block_kw),
         )
         self.stage4 = nn.Sequential(  # P4/16
-            SGhostConv(s.c(256), s.c(512), 3, 2, 1),
-            SDGhost(s.c(512), s.c(512), n=s.n(9)),
+            SGhostConv(s.c(256), s.c(512), 3, 2, 1, **ghost_kw),
+            SDGhost(s.c(512), s.c(512), n=s.n(9), **block_kw),
         )
         self.stage5 = nn.Sequential(  # P5/32
-            SGhostConv(s.c(512), s.c(1024), 3, 2, 1),
-            SDGhost(s.c(1024), s.c(1024), n=s.n(3)),
+            SGhostConv(s.c(512), s.c(1024), 3, 2, 1, **ghost_kw),
+            SDGhost(s.c(1024), s.c(1024), n=s.n(3), **block_kw),
             SPPF(s.c(1024), s.c(1024), 5),
         )
         self.out_channels = (s.c(256), s.c(512), s.c(1024))
-        
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.stem(x)
         x = self.stage2(x)
@@ -304,23 +316,42 @@ class Backbone(nn.Module):
 
 class Neck(nn.Module):
     """PANet：FPN 自顶向下 + PAN 自底向上，输出 N3 / N4 / N5。"""
-    def __init__(self, ch3: int, ch4: int, ch5: int, gw: float, gd: float) -> None:
+    def __init__(
+        self,
+        ch3: int,
+        ch4: int,
+        ch5: int,
+        gw: float,
+        gd: float,
+        *,
+        ratio: int = 2,
+        groups_ratio: int = 2,
+        kernel_size: int = 1,
+        dw_kernel_size: int = 3,
+    ) -> None:
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
 
         s = _Scaler(gw, gd)
         # 通道数由 Backbone 输出推导（已按 gw 缩放），不再写死
         c3, c4, c5 = ch3, ch4, ch5
+        gs_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
+        vov_kw = dict(
+            kernel_size=kernel_size,
+            ratio=ratio,
+            groups_ratio=groups_ratio,
+            dw_kernel_size=dw_kernel_size,
+        )
 
-        self.reduce5 = GSConv(c5, c4, 1, 1)
-        self.c3_p4 = VOVGCSP(c4 + c4, c4, n=s.n(3))
-        self.reduce4 = GSConv(c4, c3, 1, 1)
-        self.c3_p3 = VOVGCSP(c3 + c3, c3, n=s.n(3))
+        self.reduce5 = GSConv(c5, c4, 1, 1, **gs_kw)
+        self.c3_p4 = VOVGCSP(c4 + c4, c4, n=s.n(3), **vov_kw)
+        self.reduce4 = GSConv(c4, c3, 1, 1, **gs_kw)
+        self.c3_p3 = VOVGCSP(c3 + c3, c3, n=s.n(3), **vov_kw)
 
-        self.down3 = GSConv(c3, c3, 3, 2)
-        self.c3_n4 = VOVGCSP(c3 + c3, c4, n=s.n(3))
-        self.down4 = GSConv(c4, c4, 3, 2)
-        self.c3_n5 = VOVGCSP(c4 + c4, c5, n=s.n(3))
+        self.down3 = GSConv(c3, c3, 3, 2, **gs_kw)
+        self.c3_n4 = VOVGCSP(c3 + c3, c4, n=s.n(3), **vov_kw)
+        self.down4 = GSConv(c4, c4, 3, 2, **gs_kw)
+        self.c3_n5 = VOVGCSP(c4 + c4, c5, n=s.n(3), **vov_kw)
 
         self.out_channels = (c3, c4, c5)
         self.cbam_p3 = CBAM(c3)
@@ -363,6 +394,10 @@ class SGC_YOLOv5(nn.Module):
         in_channels: int = 3,
         depth_multiple: float | None = None,
         width_multiple: float | None = None,
+        ratio: int = 2,
+        groups_ratio: int = 2,
+        kernel_size: int = 1,
+        dw_kernel_size: int = 1,
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -372,8 +407,24 @@ class SGC_YOLOv5(nn.Module):
         gw = gw if width_multiple is None else width_multiple
 
         self.variant = variant
-        self.backbone = Backbone(gw, gd, in_channels)
-        self.neck = Neck(*self.backbone.out_channels, gw, gd)
+        ghost_kw = dict(
+            ratio=ratio,
+            groups_ratio=groups_ratio,
+            kernel_size=kernel_size,
+            dw_kernel_size=dw_kernel_size,
+        )
+        self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
+        # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
+        neck_dw = 3 if dw_kernel_size <= 1 else dw_kernel_size
+        self.neck = Neck(
+            *self.backbone.out_channels,
+            gw,
+            gd,
+            ratio=ratio,
+            groups_ratio=groups_ratio,
+            kernel_size=kernel_size,
+            dw_kernel_size=neck_dw,
+        )
         self.detect = Detect(nc, self.neck.out_channels, anchors)
 
     @property

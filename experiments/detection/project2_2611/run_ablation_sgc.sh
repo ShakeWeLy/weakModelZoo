@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 依次训练 configs/models 下全部已有模型（失败则停止）
+# 依次训练 SGC Ghost 参数消融（失败则停止）
+# A: dw_kernel_size=3
+# B: kernel_size=3 + dw_kernel_size=3
+# C: B + groups_ratio=4
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -9,14 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  yolov5s
-  yolov5m
-  yolov8s
-  sgc_yolov5s
-  sgc_yolov5m
-  sgc_yolov5s_nocbam
-  sgc_yolov5s_c3neck
-  sgc_yolov5s_stdearly
+  sgc_yolov5s_dw3
+  sgc_yolov5s_k3dw3
+  sgc_yolov5s_k3dw3_g4
 )
 
 for m in "${MODELS[@]}"; do
@@ -28,4 +26,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "全部模型训练完成。"
+echo "全部参数消融训练完成。"

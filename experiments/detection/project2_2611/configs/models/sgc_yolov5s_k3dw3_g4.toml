@@ -1,0 +1,20 @@
+# 参数消融 C：在 B 基础上再把 groups_ratio 2→4（ChannelShuffle 更细）。
+# 对照：SGC_YOLOv5s_V4 / sgc_yolov5s_k3dw3
+
+[experiments]
+name = "2026-11-05_006_SGC_k3dw3_g4_s_V1"
+description = "Param ablation C: SGC-YOLOv5s k=3 dw=3 groups_ratio=4 | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_k3dw3_g4"
+
+[model.params]
+variant = "s"
+kernel_size = 3
+dw_kernel_size = 3
+groups_ratio = 4
+ratio = 2
+
+[hyperparameters]
+num_epochs = 40
