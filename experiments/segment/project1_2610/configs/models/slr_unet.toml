@@ -32,10 +32,6 @@ lr_min = 0.000001
 [train]
 early_stopping_patience = 50
 
-[dataset]
-batch_size = 2
-num_workers = 0
-
 [quick.model.params]
 hidden_channels = 32
 # 冒烟可不加载 SAM 权重（路径不存在时请临时清空 sam_checkpoint）

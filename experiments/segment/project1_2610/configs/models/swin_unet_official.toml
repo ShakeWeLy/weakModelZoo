@@ -33,7 +33,7 @@ use_checkpoint = false
 final_upsample = "expand_first"
 
 [dataset]
-batch_size = 24               # 官方默认；显存不够可 --set dataset.batch_size=8
+batch_size = 16               # 官方默认；显存不够可 --set dataset.batch_size=8
 
 [hyperparameters]
 optimizer = "sgd"
