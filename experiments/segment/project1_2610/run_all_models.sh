@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  vm_unet
+  # vm_unet
   transunet_official
   swin_unet_official
   slr_unet
