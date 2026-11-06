@@ -23,9 +23,9 @@ class BaseConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int,
+        kernel_size: int | tuple[int, int],
         stride: int = 1,
-        padding: int | None = None,
+        padding: int | tuple[int, int] | None = None,
         groups: int = 1,
         bias: bool | None = None,
         act: ActArg = True,
@@ -34,7 +34,10 @@ class BaseConv(nn.Module):
         super().__init__()
 
         if padding is None:
-            padding = kernel_size // 2
+            if isinstance(kernel_size, int):
+                padding = kernel_size // 2
+            else:
+                padding = (kernel_size[0] // 2, kernel_size[1] // 2)
 
         if not 1 <= groups <= in_channels:
             raise ValueError("groups 必须位于 1 和 in_channels 之间")
@@ -44,7 +47,8 @@ class BaseConv(nn.Module):
         if bias is None:
             bias = not bool(bn)
 
-        layers: list[nn.Module] = [
+        layers: list[nn.Module] = []
+        layers.append(
             nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -54,7 +58,7 @@ class BaseConv(nn.Module):
                 groups=groups,
                 bias=bias,
             )
-        ]
+        )
 
         if isinstance(bn, nn.Module):
             layers.append(bn)
