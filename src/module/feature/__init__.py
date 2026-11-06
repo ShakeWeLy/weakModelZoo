@@ -8,7 +8,7 @@ from .sam3 import (
     resolve_sam3_checkpoint_path,
 )
 from .LEM.LEM import LEM
-from .Inception.Inception import Inception
+from .Inception.Inception import Inception, InceptionV1, InceptionV2, InceptionV2_B
 from .PANet.PANet import PANet
 from .ASFF.ASFF import ASFF
 from .SPP.SPP import SPP
@@ -26,6 +26,9 @@ __all__ = [
     "resolve_sam3_checkpoint_path",
     "LEM",
     "Inception",
+    "InceptionV1",
+    "InceptionV2",
+    "InceptionV2_B",
     "PANet",
     "ASFF",
     "SPP",
