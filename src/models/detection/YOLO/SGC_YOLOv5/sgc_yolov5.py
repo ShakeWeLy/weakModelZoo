@@ -10,6 +10,16 @@ from src.module.attention import CAM
 from src.module.attention.SAM.sam import SAM
 
 
+def _shuffle_groups(channels: int, groups_ratio: int) -> int:
+    """ChannelShuffle 要求 ``channels % groups == 0``；按 ``channels // groups_ratio`` 向下取合法分组数。"""
+    if groups_ratio < 1:
+        raise ValueError(f"groups_ratio 必须 >= 1，当前 {groups_ratio}")
+    g = max(1, channels // groups_ratio)
+    while g > 1 and channels % g != 0:
+        g -= 1
+    return g
+
+
 class SGhostConv(GhostConv):
     '''
     最后做额外的通道混洗
@@ -29,7 +39,7 @@ class SGhostConv(GhostConv):
         super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                          stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
                          act=act, bn=bn)
-        self.groups = out_channels // groups_ratio
+        self.groups = _shuffle_groups(out_channels, groups_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = super().forward(x)
@@ -184,7 +194,8 @@ class GSConv(nn.Module):
         if ratio != 2 or out_channels % 2 != 0:
             raise ValueError(f"GSConv 要求 ratio=2 且 out_channels 为偶数，当前 ratio={ratio}, out_channels={out_channels}")
         self.dw_channels = out_channels // ratio
-        self.groups = self.dw_channels // groups_ratio
+        # shuffle 作用在 cat 后的 out_channels 上，分组数需整除 out_channels
+        self.groups = _shuffle_groups(out_channels, groups_ratio * ratio)
         self.conv = BaseConv(in_channels, self.dw_channels, kernel_size, stride, act=act, bn=bn)
         self.DWconv = DepthwiseConv(self.dw_channels, dw_kernel_size, act=act, bn=bn)
     def forward(self, x: torch.Tensor) -> torch.Tensor:

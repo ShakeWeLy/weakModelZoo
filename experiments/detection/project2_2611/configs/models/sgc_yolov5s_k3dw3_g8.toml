@@ -1,0 +1,20 @@
+# 参数消融 F：在 C（k=3, dw=3, groups_ratio=4）基础上再加大 groups_ratio→8。
+# 对照：sgc_yolov5s_k3dw3_g4
+
+[experiments]
+name = "2026-11-06_009_SGC_k3dw3_g8_s_V1"
+description = "Param ablation F: SGC-YOLOv5s k=3 dw=3 groups_ratio=8 | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_k3dw3_g8"
+
+[model.params]
+variant = "s"
+kernel_size = 3
+dw_kernel_size = 3
+groups_ratio = 8
+ratio = 2
+
+[hyperparameters]
+num_epochs = 40
