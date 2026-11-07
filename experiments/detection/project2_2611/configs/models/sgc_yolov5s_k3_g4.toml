@@ -1,0 +1,20 @@
+# 参数消融 G：k=3, dw=1, groups_ratio=4。
+# 对照：sgc_yolov5s_k3 / sgc_yolov5s_k3_g3 / sgc_yolov5s_k3dw3_g4
+
+[experiments]
+name = "2026-11-07_010_SGC_k3_g4_s_V1"
+description = "Param ablation G: SGC-YOLOv5s k=3 dw=1 groups_ratio=4 | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_k3_g4"
+
+[model.params]
+variant = "s"
+kernel_size = 3
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+
+[hyperparameters]
+num_epochs = 40
