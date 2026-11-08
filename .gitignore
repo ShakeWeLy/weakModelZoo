@@ -41,6 +41,7 @@ pretrained_weights/**
 # Experiment / run outputs（训练与分析产物，不入库）
 # ============================================================
 experiments/*/*/*/runs/
+experiments/*/*/*/runs_2/
 experiments/*/*/*/outputs/
 # 分割实验的运行结果目录（按模型名分组，不入库）
 experiments/segment/project1_2610/SLR-UNet/

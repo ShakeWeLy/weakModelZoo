@@ -13,5 +13,5 @@ display_name = "YOLOv5"
 variant = "m"                # 规模：n / s / m / l / x
 
 [hyperparameters]
-num_epochs = 50
+num_epochs = 100
 # anchors = [[10,13,16,30,33,23],[30,61,62,45,59,119],[116,90,156,198,373,326]]  # 留空则用官方默认锚框

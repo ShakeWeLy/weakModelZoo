@@ -11,8 +11,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_k3_g4
-  sgc_yolov5s_k3_g8
+  # sgc_yolov5s_k3_g4
+  # sgc_yolov5s_k3_g8
+  sgc_yolov5s
+  yolov5s
+  sgc_yolov5m
+  yolov5m
 )
 
 for m in "${MODELS[@]}"; do
