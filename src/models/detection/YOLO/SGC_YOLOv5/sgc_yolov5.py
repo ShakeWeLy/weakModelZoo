@@ -93,7 +93,9 @@ class DFCAttention(nn.Module):
 
 class Bottleneck(nn.Module):
     '''
-    特征增强, 不改变size和channel,
+    特征增强, 不改变size和channel。
+    默认两层 SGhostConv 共用 kernel_size；若指定 mid_kernel_size，则变为 YOLO 式 1×1 → 3×3
+    （第一层 kernel_size，第二层 mid_kernel_size）。
     '''
     def __init__(self,
                 in_channels,
@@ -106,6 +108,7 @@ class Bottleneck(nn.Module):
                 dw_kernel_size=1,
                 act=F.silu,
                 bn=F.batch_norm,
+                mid_kernel_size: int | None = None,
                 ) -> None:
         super().__init__()
         if in_channels != out_channels:
@@ -113,10 +116,11 @@ class Bottleneck(nn.Module):
         # YOLO 的 Bottleneck 都是 stride=1，下采样由单独的卷积层完成，这里不支持 stride != 1
         if stride != 1:
             raise ValueError("Bottleneck 只支持 stride=1，下采样请使用单独的卷积层")
+        k2 = kernel_size if mid_kernel_size is None else mid_kernel_size
         self.SGhostConv1 = SGhostConv(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw_kernel_size, act=act, bn=bn)
-        self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size,
+        self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=k2,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw_kernel_size, act=act, bn=bn)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
@@ -155,15 +159,20 @@ class SDGhost(nn.Module):
                  dw_kernel_size=1,
                  act=F.silu,
                  bn=F.batch_norm,
+                 mid_kernel_size: int | None = None,
                  ) -> None:
         super().__init__()
         if n < 1:
             raise ValueError("n 必须 >= 1")
+        # GBS 作通道投影，保持 kernel_size（YOLO 风格下为 1×1）；空间 3×3 只放在 Bottleneck 第二层
         self.GBS1 = GBS(in_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         self.GBS2 = GBS(out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         # 与 YOLO C3 一样堆叠 n 个 Bottleneck；GBS1 之后通道已是 out_channels，所以堆叠块的输入输出都是 out_channels
         self.bottleneck = nn.Sequential(*[
-            Bottleneck(out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+            Bottleneck(
+                out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio,
+                dw_kernel_size, act, bn, mid_kernel_size=mid_kernel_size,
+            )
             for _ in range(n)
         ])
 
@@ -205,12 +214,24 @@ class GSConv(nn.Module):
 
 class GSBottleneck(nn.Module):
     '''
-    通道数保持不变的 GS 瓶颈: GSConv -> GSConv + 残差，对应 YOLO C3 中的 Bottleneck，可堆叠
+    通道数保持不变的 GS 瓶颈: GSConv -> GSConv + 残差，对应 YOLO C3 中的 Bottleneck，可堆叠。
+    mid_kernel_size 非空时第二层用该核（YOLO 式 1×1 → 3×3）。
     '''
-    def __init__(self, channels, kernel_size=1, ratio=2, groups_ratio=2, dw_kernel_size=3, act=F.silu, bn=F.batch_norm):
+    def __init__(
+        self,
+        channels,
+        kernel_size=1,
+        ratio=2,
+        groups_ratio=2,
+        dw_kernel_size=3,
+        act=F.silu,
+        bn=F.batch_norm,
+        mid_kernel_size: int | None = None,
+    ):
         super().__init__()
+        k2 = kernel_size if mid_kernel_size is None else mid_kernel_size
         self.GSConv1 = GSConv(channels, channels, kernel_size, 1, ratio, groups_ratio, dw_kernel_size, act, bn)
-        self.GSConv2 = GSConv(channels, channels, kernel_size, 1, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.GSConv2 = GSConv(channels, channels, k2, 1, ratio, groups_ratio, dw_kernel_size, act, bn)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.GSConv2(self.GSConv1(x)) + x
@@ -236,6 +257,7 @@ class VOVGCSP(nn.Module):
                  dw_kernel_size=3,
                  act=F.silu,
                  bn=F.batch_norm,
+                 mid_kernel_size: int | None = None,
                  ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -248,7 +270,10 @@ class VOVGCSP(nn.Module):
         self.conv_bottle_input = BaseConv(self.in_channels_half, self.in_channels_half_ghost, 1, stride, act=act, bn=bn)  # 调整通道数
         # 堆叠 n 个 GS 瓶颈（通道数保持 half_ghost），对应 YOLO C3 的 n 个 Bottleneck
         self.gs_bottlenecks = nn.Sequential(*[
-            GSBottleneck(self.in_channels_half_ghost, kernel_size, ratio, groups_ratio, dw_kernel_size, act, bn)
+            GSBottleneck(
+                self.in_channels_half_ghost, kernel_size, ratio, groups_ratio, dw_kernel_size, act, bn,
+                mid_kernel_size=mid_kernel_size,
+            )
             for _ in range(n)
         ])
         # 投影回 in_half，便于与 x2 拼接
@@ -291,11 +316,18 @@ class Backbone(nn.Module):
         groups_ratio: int = 2,
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
+        mid_kernel_size: int | None = None,
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
         ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
-        block_kw = dict(kernel_size=kernel_size, ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
+        block_kw = dict(
+            kernel_size=kernel_size,
+            ratio=ratio,
+            groups_ratio=groups_ratio,
+            dw_kernel_size=dw_kernel_size,
+            mid_kernel_size=mid_kernel_size,
+        )
         self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
         self.stage2 = nn.Sequential(  # P2/4
             SGhostConv(s.c(64), s.c(128), 3, 2, 1, **ghost_kw),
@@ -339,6 +371,7 @@ class Neck(nn.Module):
         groups_ratio: int = 2,
         kernel_size: int = 1,
         dw_kernel_size: int = 3,
+        mid_kernel_size: int | None = None,
     ) -> None:
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
@@ -352,6 +385,7 @@ class Neck(nn.Module):
             ratio=ratio,
             groups_ratio=groups_ratio,
             dw_kernel_size=dw_kernel_size,
+            mid_kernel_size=mid_kernel_size,
         )
 
         self.reduce5 = GSConv(c5, c4, 1, 1, **gs_kw)
@@ -409,6 +443,7 @@ class SGC_YOLOv5(nn.Module):
         groups_ratio: int = 2,
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
+        mid_kernel_size: int | None = None,
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -423,6 +458,7 @@ class SGC_YOLOv5(nn.Module):
             groups_ratio=groups_ratio,
             kernel_size=kernel_size,
             dw_kernel_size=dw_kernel_size,
+            mid_kernel_size=mid_kernel_size,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
@@ -435,6 +471,7 @@ class SGC_YOLOv5(nn.Module):
             groups_ratio=groups_ratio,
             kernel_size=kernel_size,
             dw_kernel_size=neck_dw,
+            mid_kernel_size=mid_kernel_size,
         )
         self.detect = Detect(nc, self.neck.out_channels, anchors)
 
