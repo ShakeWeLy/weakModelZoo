@@ -144,8 +144,11 @@ class Bottleneck(nn.Module):
 
 class SDGhost(nn.Module):
     """
-    和SGhost结合, SGhostConv+SDGhost, 替换CSP1,2,3
-    并且在CSP3和SPP之间有一个CSP3.5, channel = 1024
+    和SGhost结合, SGhostConv+SDGhost, 替换CSP1,2,3。
+
+    - ``e=1``（默认）：GBS1/2 与 Bottleneck 均在 ``out_channels`` 上（满通道）。
+    - ``e<1``（如 0.5）：YOLO C3 式窄通道 —
+      GBS1(1×1) 降维到 ``c_=int(out*e)`` → n×Bottleneck → GBS2(1×1) 升维回 out。
     """
     def __init__(self,
                  in_channels,
@@ -160,17 +163,26 @@ class SDGhost(nn.Module):
                  act=F.silu,
                  bn=F.batch_norm,
                  mid_kernel_size: int | None = None,
+                 e: float = 1.0,
                  ) -> None:
         super().__init__()
         if n < 1:
             raise ValueError("n 必须 >= 1")
-        # GBS 作通道投影，保持 kernel_size（YOLO 风格下为 1×1）；空间 3×3 只放在 Bottleneck 第二层
-        self.GBS1 = GBS(in_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-        self.GBS2 = GBS(out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-        # 与 YOLO C3 一样堆叠 n 个 Bottleneck；GBS1 之后通道已是 out_channels，所以堆叠块的输入输出都是 out_channels
+        if e <= 0 or e > 1:
+            raise ValueError(f"e 须在 (0, 1]，当前 {e}")
+        # 隐藏宽度；e<1 时对齐 Ghost ratio（偶数通道更稳）
+        c_ = int(out_channels * e)
+        c_ = max(ratio, c_ - (c_ % ratio))
+        if c_ > out_channels:
+            c_ = out_channels
+        self.hidden_channels = c_
+
+        # GBS1 降维/投影 → Bottleneck（可配 1×1→3×3）→ GBS2 升维/投影
+        self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         self.bottleneck = nn.Sequential(*[
             Bottleneck(
-                out_channels, out_channels, kernel_size, stride, padding, ratio, groups_ratio,
+                c_, c_, kernel_size, stride, padding, ratio, groups_ratio,
                 dw_kernel_size, act, bn, mid_kernel_size=mid_kernel_size,
             )
             for _ in range(n)
@@ -317,6 +329,7 @@ class Backbone(nn.Module):
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
+        e: float = 1.0,
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
@@ -327,6 +340,7 @@ class Backbone(nn.Module):
             groups_ratio=groups_ratio,
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
+            e=e,
         )
         self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
         self.stage2 = nn.Sequential(  # P2/4
@@ -444,6 +458,7 @@ class SGC_YOLOv5(nn.Module):
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
+        e: float = 1.0,
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -459,9 +474,11 @@ class SGC_YOLOv5(nn.Module):
             kernel_size=kernel_size,
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
+            e=e,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
+        # Neck/VOVGCSP 本身已有通道拆分，此处不传 e（仅 SDGhost 做 CSP 窄通道）
         neck_dw = 3 if dw_kernel_size <= 1 else dw_kernel_size
         self.neck = Neck(
             *self.backbone.out_channels,

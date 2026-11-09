@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 依次训练 SGC Ghost 参数消融（失败则停止）
-# I: 基于 G（dw=1,g=4），Bottleneck 改为 YOLO 式 1×1 → 3×3
+# J: CSP e=0.5 SDGhost + Bottleneck Ghost 1×1→3×3（dw=1, g=4）
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_k1x3_g4
+  sgc_yolov5s_csp_k1x3_g4
 )
 
 for m in "${MODELS[@]}"; do
