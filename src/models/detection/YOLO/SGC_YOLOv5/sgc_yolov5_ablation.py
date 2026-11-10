@@ -3,6 +3,7 @@
 1. SGC_YOLOv5_NoCBAM      : 去掉输出前 CBAM
 2. SGC_YOLOv5_C3Neck      : Neck 中 VOVGCSP -> 标准 C3（保留 GSConv / CBAM）
 3. SGC_YOLOv5_StdEarly    : Backbone 浅层 stage2/3 用 Conv+C3，深层仍用 SGhost/SDGhost
+4. SGC_YOLOv5_StdBackbone : Backbone 全标准 Conv+C3；Neck 用 VOVGCSPYolo（GSConv+CBAM）
 """
 
 from __future__ import annotations
@@ -209,5 +210,71 @@ class SGC_YOLOv5_StdEarly(_SGCDetBase):
         gd, gw = _parse_scales(variant, depth_multiple, width_multiple)
         backbone = BackboneStdEarly(gw, gd, in_channels)
         neck = Neck(*backbone.out_channels, gw, gd)
+        super().__init__(backbone, neck, nc, anchors)
+        self.variant = variant
+
+
+class BackboneStdFull(nn.Module):
+    """全阶段标准 YOLOv5 Backbone：Conv+C3（含 SPPF）。"""
+
+    def __init__(self, gw: float = 1.0, gd: float = 1.0, in_channels: int = 3) -> None:
+        super().__init__()
+        s = _Scaler(gw, gd)
+        self.stem = Conv(in_channels, s.c(64), 6, 2, 2)
+        self.stage2 = nn.Sequential(
+            Conv(s.c(64), s.c(128), 3, 2),
+            C3(s.c(128), s.c(128), s.n(3)),
+        )
+        self.stage3 = nn.Sequential(
+            Conv(s.c(128), s.c(256), 3, 2),
+            C3(s.c(256), s.c(256), s.n(6)),
+        )
+        self.stage4 = nn.Sequential(
+            Conv(s.c(256), s.c(512), 3, 2),
+            C3(s.c(512), s.c(512), s.n(9)),
+        )
+        self.stage5 = nn.Sequential(
+            Conv(s.c(512), s.c(1024), 3, 2),
+            C3(s.c(1024), s.c(1024), s.n(3)),
+            SPPF(s.c(1024), s.c(1024), 5),
+        )
+        self.out_channels = (s.c(256), s.c(512), s.c(1024))
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = self.stem(x)
+        x = self.stage2(x)
+        p3 = self.stage3(x)
+        p4 = self.stage4(p3)
+        p5 = self.stage5(p4)
+        return p3, p4, p5
+
+
+class SGC_YOLOv5_StdBackbone(_SGCDetBase):
+    """消融：Backbone 全标准 Conv+C3；Neck 用 VOVGCSPYolo（保留 GSConv / CBAM）。"""
+
+    def __init__(
+        self,
+        nc: int = 80,
+        variant: str = "s",
+        anchors=DEFAULT_ANCHORS,
+        in_channels: int = 3,
+        depth_multiple: float | None = None,
+        width_multiple: float | None = None,
+        groups_ratio: int = 4,
+        dw_kernel_size: int = 1,
+        ratio: int = 2,
+    ) -> None:
+        gd, gw = _parse_scales(variant, depth_multiple, width_multiple)
+        backbone = BackboneStdFull(gw, gd, in_channels)
+        neck_dw = 3 if dw_kernel_size <= 1 else dw_kernel_size
+        neck = Neck(
+            *backbone.out_channels,
+            gw,
+            gd,
+            ratio=ratio,
+            groups_ratio=groups_ratio,
+            dw_kernel_size=neck_dw,
+            vov_style="yolo",
+        )
         super().__init__(backbone, neck, nc, anchors)
         self.variant = variant

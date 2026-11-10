@@ -1,0 +1,19 @@
+# 消融 M：Backbone 全标准 YOLOv5 Conv+C3；Neck 仅用新 VOVGCSPYolo（保留 GSConv/CBAM）。
+# 对照：YOLOv5s / K / L
+
+[experiments]
+name = "2026-11-10_016_SGC_stdbb_vovyolo_s_V1"
+description = "Ablation M: std YOLO backbone + VOVGCSPYolo neck | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5_stdbackbone"
+display_name = "SGC_YOLOv5_stdbb_vovyolo"
+
+[model.params]
+variant = "s"
+groups_ratio = 4
+dw_kernel_size = 1
+ratio = 2
+
+[hyperparameters]
+num_epochs = 40

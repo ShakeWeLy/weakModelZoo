@@ -1,0 +1,21 @@
+# 消融 K：在 G（k=3,dw=1,g=4）基础上，仅把 Neck 的 VOVGCSP 改为 YOLO 式投影 VOVGCSPYolo。
+# 对照：sgc_yolov5s_k3_g4（G）
+
+[experiments]
+name = "2026-11-10_014_SGC_g_vovyolo_s_V1"
+description = "Ablation K: G recipe + VOVGCSPYolo neck | Det_Fly | same recipe as SGC V4"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_g_vovyolo"
+
+[model.params]
+variant = "s"
+kernel_size = 3
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+vov_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40

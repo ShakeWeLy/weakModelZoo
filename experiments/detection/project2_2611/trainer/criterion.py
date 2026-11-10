@@ -19,6 +19,7 @@ def build_criterion(cfg: Mapping[str, Any], model: nn.Module, img_size: int) -> 
         "sgc_yolov5_nocbam",
         "sgc_yolov5_c3neck",
         "sgc_yolov5_stdearly",
+        "sgc_yolov5_stdbackbone",
     }:
         return YOLOv5Loss(model.detect, hyp, img_size)
     if arch == "yolov8":

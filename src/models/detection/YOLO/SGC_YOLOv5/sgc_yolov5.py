@@ -303,7 +303,53 @@ class VOVGCSP(nn.Module):
         x2 = self.conv_reduce(x2)
         x = torch.cat([x1, x2], dim=1)
         return self.conv_out(x)
-    
+
+
+class VOVGCSPYolo(nn.Module):
+    """YOLO C3 式 VOVGCSP：双路 1×1 投影（非通道切分），主路宽度 ``c_≈out/2``，
+    堆叠 ``GSBottleneck`` 为 1×1→3×3 并保留残差。
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        n: int = 1,
+        ratio: int = 2,
+        groups_ratio: int = 2,
+        dw_kernel_size: int = 3,
+        act=F.silu,
+        bn=F.batch_norm,
+        e: float = 0.5,
+    ) -> None:
+        super().__init__()
+        if n < 1:
+            raise ValueError("n 必须 >= 1")
+        if e <= 0 or e > 1:
+            raise ValueError(f"e 须在 (0, 1]，当前 {e}")
+        c_ = int(out_channels * e)
+        c_ = max(ratio, c_ - (c_ % ratio))
+        self.cv1 = BaseConv(in_channels, c_, 1, 1, act=act, bn=bn)
+        self.cv2 = BaseConv(in_channels, c_, 1, 1, act=act, bn=bn)
+        self.m = nn.Sequential(*[
+            GSBottleneck(
+                c_,
+                kernel_size=1,
+                ratio=ratio,
+                groups_ratio=groups_ratio,
+                dw_kernel_size=dw_kernel_size,
+                act=act,
+                bn=bn,
+                mid_kernel_size=3,
+            )
+            for _ in range(n)
+        ])
+        self.cv3 = BaseConv(2 * c_, out_channels, 1, 1, act=act, bn=bn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
+
+
 class CBAM(nn.Module):
     '''
     CBAM注意力模块
@@ -372,7 +418,12 @@ class Backbone(nn.Module):
 
 
 class Neck(nn.Module):
-    """PANet：FPN 自顶向下 + PAN 自底向上，输出 N3 / N4 / N5。"""
+    """PANet：FPN 自顶向下 + PAN 自底向上，输出 N3 / N4 / N5。
+
+    ``vov_style``:
+      - ``split``: 原 VOVGCSP（通道切分）
+      - ``yolo``: VOVGCSPYolo（双 1×1 投影 + 窄通道 GSBottleneck 1×1→3×3）
+    """
     def __init__(
         self,
         ch3: int,
@@ -386,6 +437,7 @@ class Neck(nn.Module):
         kernel_size: int = 1,
         dw_kernel_size: int = 3,
         mid_kernel_size: int | None = None,
+        vov_style: str = "split",
     ) -> None:
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
@@ -394,23 +446,36 @@ class Neck(nn.Module):
         # 通道数由 Backbone 输出推导（已按 gw 缩放），不再写死
         c3, c4, c5 = ch3, ch4, ch5
         gs_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
-        vov_kw = dict(
-            kernel_size=kernel_size,
-            ratio=ratio,
-            groups_ratio=groups_ratio,
-            dw_kernel_size=dw_kernel_size,
-            mid_kernel_size=mid_kernel_size,
-        )
+        style = str(vov_style).lower()
+        if style == "yolo":
+            def _vov(cin: int, cout: int, n: int) -> nn.Module:
+                return VOVGCSPYolo(
+                    cin, cout, n=n, ratio=ratio, groups_ratio=groups_ratio,
+                    dw_kernel_size=dw_kernel_size,
+                )
+        elif style == "split":
+            vov_kw = dict(
+                kernel_size=kernel_size,
+                ratio=ratio,
+                groups_ratio=groups_ratio,
+                dw_kernel_size=dw_kernel_size,
+                mid_kernel_size=mid_kernel_size,
+            )
+
+            def _vov(cin: int, cout: int, n: int) -> nn.Module:
+                return VOVGCSP(cin, cout, n=n, **vov_kw)
+        else:
+            raise ValueError(f"未知 vov_style={vov_style!r}（可选 split / yolo）")
 
         self.reduce5 = GSConv(c5, c4, 1, 1, **gs_kw)
-        self.c3_p4 = VOVGCSP(c4 + c4, c4, n=s.n(3), **vov_kw)
+        self.c3_p4 = _vov(c4 + c4, c4, s.n(3))
         self.reduce4 = GSConv(c4, c3, 1, 1, **gs_kw)
-        self.c3_p3 = VOVGCSP(c3 + c3, c3, n=s.n(3), **vov_kw)
+        self.c3_p3 = _vov(c3 + c3, c3, s.n(3))
 
         self.down3 = GSConv(c3, c3, 3, 2, **gs_kw)
-        self.c3_n4 = VOVGCSP(c3 + c3, c4, n=s.n(3), **vov_kw)
+        self.c3_n4 = _vov(c3 + c3, c4, s.n(3))
         self.down4 = GSConv(c4, c4, 3, 2, **gs_kw)
-        self.c3_n5 = VOVGCSP(c4 + c4, c5, n=s.n(3), **vov_kw)
+        self.c3_n5 = _vov(c4 + c4, c5, s.n(3))
 
         self.out_channels = (c3, c4, c5)
         self.cbam_p3 = CBAM(c3)
@@ -459,6 +524,7 @@ class SGC_YOLOv5(nn.Module):
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
         e: float = 1.0,
+        vov_style: str = "split",
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -489,6 +555,7 @@ class SGC_YOLOv5(nn.Module):
             kernel_size=kernel_size,
             dw_kernel_size=neck_dw,
             mid_kernel_size=mid_kernel_size,
+            vov_style=vov_style,
         )
         self.detect = Detect(nc, self.neck.out_channels, anchors)
 

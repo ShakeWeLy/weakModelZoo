@@ -21,6 +21,7 @@ from src.models.detection.YOLO.SGC_YOLOv5.sgc_yolov5 import SGC_YOLOv5  # noqa: 
 from src.models.detection.YOLO.SGC_YOLOv5.sgc_yolov5_ablation import (  # noqa: E402
     SGC_YOLOv5_C3Neck,
     SGC_YOLOv5_NoCBAM,
+    SGC_YOLOv5_StdBackbone,
     SGC_YOLOv5_StdEarly,
 )
 
@@ -31,6 +32,7 @@ MODEL_ARCHS: dict[str, Callable[..., nn.Module]] = {
     "sgc_yolov5_nocbam": SGC_YOLOv5_NoCBAM,
     "sgc_yolov5_c3neck": SGC_YOLOv5_C3Neck,
     "sgc_yolov5_stdearly": SGC_YOLOv5_StdEarly,
+    "sgc_yolov5_stdbackbone": SGC_YOLOv5_StdBackbone,
 }
 
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# 依次训练 SGC Ghost 参数消融（失败则停止）
-# J: CSP e=0.5 SDGhost + Bottleneck Ghost 1×1→3×3（dw=1, g=4）
+# 依次训练 VOVGCSPYolo 相关消融（失败则停止）
+# K: G + VOVGCSPYolo
+# L: J + VOVGCSPYolo
+# M: 全标准 Backbone + VOVGCSPYolo Neck
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -10,7 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_csp_k1x3_g4
+  sgc_yolov5s_g_vovyolo
+  sgc_yolov5s_j_vovyolo
+  sgc_yolov5s_stdbb_vovyolo
 )
 
 for m in "${MODELS[@]}"; do
