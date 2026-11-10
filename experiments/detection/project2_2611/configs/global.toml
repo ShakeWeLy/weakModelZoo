@@ -26,7 +26,7 @@ optimizer = "sgd"            # 可选: sgd / adam / adamw（YOLOv5 默认 sgd）
 learning_rate = 0.01         # 初始学习率 lr0
 momentum = 0.937             # sgd 动量 / adam beta1
 weight_decay = 0.0005        # 只作用于卷积权重，BN 与 bias 不做衰减
-num_epochs = 300
+num_epochs = 50
 lr_scheduler = "linear"      # 可选: none / linear / cosine
 lr_final_factor = 0.01       # linear / cosine：末端学习率 = learning_rate * lr_final_factor
 warmup_epochs = 3.0          # 迭代级 warmup 的 epoch 数（0 = 关闭），与官方一致
