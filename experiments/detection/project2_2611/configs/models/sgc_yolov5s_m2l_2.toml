@@ -1,0 +1,25 @@
+# M→L 阶梯 2：在 step1 上把投影 GBS 改回 Ghost（proj=ghost）；Bottleneck 仍稠密；下采样仍 Conv。
+# 对照：m2l_1 / L
+
+[experiments]
+name = "2026-11-11_019_SGC_m2l_2_s_V1"
+description = "M->L step2: Conv-down + SDGhost(e=0.5,proj=ghost,dense-bot) + VOVGCSPYolo"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_m2l_2"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "ghost"
+bottleneck_type = "dense"
+
+[hyperparameters]
+num_epochs = 40

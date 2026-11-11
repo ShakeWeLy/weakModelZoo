@@ -167,6 +167,7 @@ class SDGhost(nn.Module):
                  mid_kernel_size: int | None = None,
                  e: float = 1.0,
                  bottleneck_type: str = "ghost",
+                 proj_type: str = "ghost",
                  ) -> None:
         super().__init__()
         if n < 1:
@@ -176,6 +177,9 @@ class SDGhost(nn.Module):
         btype = str(bottleneck_type).lower()
         if btype not in {"ghost", "dense"}:
             raise ValueError(f"bottleneck_type 须为 ghost/dense，当前 {bottleneck_type!r}")
+        ptype = str(proj_type).lower()
+        if ptype not in {"ghost", "conv"}:
+            raise ValueError(f"proj_type 须为 ghost/conv，当前 {proj_type!r}")
         # 隐藏宽度；e<1 时对齐 Ghost ratio（偶数通道更稳）
         c_ = int(out_channels * e)
         c_ = max(ratio, c_ - (c_ % ratio))
@@ -183,9 +187,13 @@ class SDGhost(nn.Module):
             c_ = out_channels
         self.hidden_channels = c_
 
-        # GBS1 降维/投影 → Bottleneck → GBS2 升维/投影（GBS 仍为 Ghost）
-        self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-        self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+        # 投影：ghost=GBS；conv=标准 1×1（更接近 YOLO C3 的通道投影）
+        if ptype == "conv":
+            self.GBS1 = Conv(in_channels, c_, 1, 1)
+            self.GBS2 = Conv(c_, out_channels, 1, 1)
+        else:
+            self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+            self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         if btype == "dense":
             self.bottleneck = nn.Sequential(*[
                 YoloBottleneck(c_, c_, shortcut=True, e=1.0) for _ in range(n)
@@ -388,9 +396,14 @@ class Backbone(nn.Module):
         mid_kernel_size: int | None = None,
         e: float = 1.0,
         bottleneck_type: str = "ghost",
+        proj_type: str = "ghost",
+        downsample_type: str = "sghost",
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
+        dtype = str(downsample_type).lower()
+        if dtype not in {"sghost", "conv"}:
+            raise ValueError(f"downsample_type 须为 sghost/conv，当前 {downsample_type!r}")
         ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
         block_kw = dict(
             kernel_size=kernel_size,
@@ -400,22 +413,29 @@ class Backbone(nn.Module):
             mid_kernel_size=mid_kernel_size,
             e=e,
             bottleneck_type=bottleneck_type,
+            proj_type=proj_type,
         )
+
+        def _down(cin: int, cout: int) -> nn.Module:
+            if dtype == "conv":
+                return Conv(cin, cout, 3, 2)
+            return SGhostConv(cin, cout, 3, 2, 1, **ghost_kw)
+
         self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
         self.stage2 = nn.Sequential(  # P2/4
-            SGhostConv(s.c(64), s.c(128), 3, 2, 1, **ghost_kw),
+            _down(s.c(64), s.c(128)),
             SDGhost(s.c(128), s.c(128), n=s.n(3), **block_kw),
         )
         self.stage3 = nn.Sequential(  # P3/8
-            SGhostConv(s.c(128), s.c(256), 3, 2, 1, **ghost_kw),
+            _down(s.c(128), s.c(256)),
             SDGhost(s.c(256), s.c(256), n=s.n(6), **block_kw),
         )
         self.stage4 = nn.Sequential(  # P4/16
-            SGhostConv(s.c(256), s.c(512), 3, 2, 1, **ghost_kw),
+            _down(s.c(256), s.c(512)),
             SDGhost(s.c(512), s.c(512), n=s.n(9), **block_kw),
         )
         self.stage5 = nn.Sequential(  # P5/32
-            SGhostConv(s.c(512), s.c(1024), 3, 2, 1, **ghost_kw),
+            _down(s.c(512), s.c(1024)),
             SDGhost(s.c(1024), s.c(1024), n=s.n(3), **block_kw),
             SPPF(s.c(1024), s.c(1024), 5),
         )
@@ -539,6 +559,8 @@ class SGC_YOLOv5(nn.Module):
         e: float = 1.0,
         vov_style: str = "split",
         bottleneck_type: str = "ghost",
+        proj_type: str = "ghost",
+        downsample_type: str = "sghost",
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -556,6 +578,8 @@ class SGC_YOLOv5(nn.Module):
             mid_kernel_size=mid_kernel_size,
             e=e,
             bottleneck_type=bottleneck_type,
+            proj_type=proj_type,
+            downsample_type=downsample_type,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖

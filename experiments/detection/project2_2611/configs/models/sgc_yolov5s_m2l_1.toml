@@ -1,0 +1,26 @@
+# M→L 阶梯 1：相对 M，把 C3 换成「Conv投影 + 稠密Bottleneck」的 SDGhost(e=0.5)；下采样仍 Conv。
+# Neck 与 M/L 相同：VOVGCSPYolo。
+# 对照：stdbb_vovyolo（M）
+
+[experiments]
+name = "2026-11-11_018_SGC_m2l_1_s_V1"
+description = "M->L step1: Conv-down + SDGhost(e=0.5,proj=conv,dense-bot) + VOVGCSPYolo"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_m2l_1"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "conv"
+bottleneck_type = "dense"
+
+[hyperparameters]
+num_epochs = 40

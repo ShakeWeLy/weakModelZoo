@@ -1,0 +1,26 @@
+# M→L 阶梯 3：在 step2 上把 Bottleneck 改回 Ghost；下采样仍 Conv（尚未到完整 L）。
+# 对照：m2l_2 / j_vovyolo（L=再把下采样改为 SGhost）
+
+[experiments]
+name = "2026-11-11_020_SGC_m2l_3_s_V1"
+description = "M->L step3: Conv-down + SDGhost(e=0.5,proj=ghost,ghost-bot) + VOVGCSPYolo"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_m2l_3"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "ghost"
+bottleneck_type = "ghost"
+
+[hyperparameters]
+num_epochs = 40
