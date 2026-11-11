@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# 依次训练 VOVGCSPYolo 相关消融（失败则停止）
-# K: G + VOVGCSPYolo
-# L: J + VOVGCSPYolo
-# M: 全标准 Backbone + VOVGCSPYolo Neck
+# 依次训练 SGC 消融（失败则停止）
+# N: L 基础上 SDGhost 内 Bottleneck 改为稠密 1×1→3×3
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -12,9 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_g_vovyolo
-  sgc_yolov5s_j_vovyolo
-  sgc_yolov5s_stdbb_vovyolo
+  sgc_yolov5s_l_densebot
 )
 
 for m in "${MODELS[@]}"; do

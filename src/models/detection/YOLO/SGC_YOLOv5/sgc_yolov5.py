@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.module.conv import DepthwiseConv, GhostConv, BaseConv
+from src.models.detection.YOLO.common import Bottleneck as YoloBottleneck
 from src.models.detection.YOLO.common import Conv, SPPF
 from src.models.detection.YOLO.yolov5 import DEFAULT_ANCHORS, VARIANTS, Detect, _Scaler  # _Scaler: 与标准 YOLOv5 相同的缩放规则
 from src.module.attention import CAM
@@ -149,6 +150,7 @@ class SDGhost(nn.Module):
     - ``e=1``（默认）：GBS1/2 与 Bottleneck 均在 ``out_channels`` 上（满通道）。
     - ``e<1``（如 0.5）：YOLO C3 式窄通道 —
       GBS1(1×1) 降维到 ``c_=int(out*e)`` → n×Bottleneck → GBS2(1×1) 升维回 out。
+    - ``bottleneck_type``: ``ghost`` 用 SGhost+DFC；``dense`` 用 YOLO 稠密 1×1→3×3 Bottleneck。
     """
     def __init__(self,
                  in_channels,
@@ -164,12 +166,16 @@ class SDGhost(nn.Module):
                  bn=F.batch_norm,
                  mid_kernel_size: int | None = None,
                  e: float = 1.0,
+                 bottleneck_type: str = "ghost",
                  ) -> None:
         super().__init__()
         if n < 1:
             raise ValueError("n 必须 >= 1")
         if e <= 0 or e > 1:
             raise ValueError(f"e 须在 (0, 1]，当前 {e}")
+        btype = str(bottleneck_type).lower()
+        if btype not in {"ghost", "dense"}:
+            raise ValueError(f"bottleneck_type 须为 ghost/dense，当前 {bottleneck_type!r}")
         # 隐藏宽度；e<1 时对齐 Ghost ratio（偶数通道更稳）
         c_ = int(out_channels * e)
         c_ = max(ratio, c_ - (c_ % ratio))
@@ -177,16 +183,21 @@ class SDGhost(nn.Module):
             c_ = out_channels
         self.hidden_channels = c_
 
-        # GBS1 降维/投影 → Bottleneck（可配 1×1→3×3）→ GBS2 升维/投影
+        # GBS1 降维/投影 → Bottleneck → GBS2 升维/投影（GBS 仍为 Ghost）
         self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-        self.bottleneck = nn.Sequential(*[
-            Bottleneck(
-                c_, c_, kernel_size, stride, padding, ratio, groups_ratio,
-                dw_kernel_size, act, bn, mid_kernel_size=mid_kernel_size,
-            )
-            for _ in range(n)
-        ])
+        if btype == "dense":
+            self.bottleneck = nn.Sequential(*[
+                YoloBottleneck(c_, c_, shortcut=True, e=1.0) for _ in range(n)
+            ])
+        else:
+            self.bottleneck = nn.Sequential(*[
+                Bottleneck(
+                    c_, c_, kernel_size, stride, padding, ratio, groups_ratio,
+                    dw_kernel_size, act, bn, mid_kernel_size=mid_kernel_size,
+                )
+                for _ in range(n)
+            ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.GBS1(x)
@@ -376,6 +387,7 @@ class Backbone(nn.Module):
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
         e: float = 1.0,
+        bottleneck_type: str = "ghost",
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
@@ -387,6 +399,7 @@ class Backbone(nn.Module):
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
             e=e,
+            bottleneck_type=bottleneck_type,
         )
         self.stem = Conv(in_channels, s.c(64), 6, 2, 2)  # P1/2
         self.stage2 = nn.Sequential(  # P2/4
@@ -525,6 +538,7 @@ class SGC_YOLOv5(nn.Module):
         mid_kernel_size: int | None = None,
         e: float = 1.0,
         vov_style: str = "split",
+        bottleneck_type: str = "ghost",
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -541,6 +555,7 @@ class SGC_YOLOv5(nn.Module):
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
             e=e,
+            bottleneck_type=bottleneck_type,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
