@@ -97,6 +97,7 @@ class Bottleneck(nn.Module):
     特征增强, 不改变size和channel。
     默认两层 SGhostConv 共用 kernel_size；若指定 mid_kernel_size，则变为 YOLO 式 1×1 → 3×3
     （第一层 kernel_size，第二层 mid_kernel_size）。
+    mid_dw_kernel_size 非空时，仅第二层（3×3 段）廉价 DW 用该核；第一层仍用 dw_kernel_size。
     '''
     def __init__(self,
                 in_channels,
@@ -110,6 +111,7 @@ class Bottleneck(nn.Module):
                 act=F.silu,
                 bn=F.batch_norm,
                 mid_kernel_size: int | None = None,
+                mid_dw_kernel_size: int | None = None,
                 ) -> None:
         super().__init__()
         if in_channels != out_channels:
@@ -118,12 +120,13 @@ class Bottleneck(nn.Module):
         if stride != 1:
             raise ValueError("Bottleneck 只支持 stride=1，下采样请使用单独的卷积层")
         k2 = kernel_size if mid_kernel_size is None else mid_kernel_size
+        dw2 = dw_kernel_size if mid_dw_kernel_size is None else mid_dw_kernel_size
         self.SGhostConv1 = SGhostConv(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw_kernel_size, act=act, bn=bn)
         self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=k2,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
-                                      dw_kernel_size=dw_kernel_size, act=act, bn=bn)
+                                      dw_kernel_size=dw2, act=act, bn=bn)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
         self.DFCAttention = DFCAttention(in_channels)
         # 残差支路的深度卷积固定 3×3，不随主卷积 kernel 变化（主卷积已改为 1×1）
@@ -168,6 +171,7 @@ class SDGhost(nn.Module):
                  act=F.silu,
                  bn=F.batch_norm,
                  mid_kernel_size: int | None = None,
+                 mid_dw_kernel_size: int | None = None,
                  e: float = 1.0,
                  bottleneck_type: str = "ghost",
                  proj_type: str = "ghost",
@@ -203,7 +207,9 @@ class SDGhost(nn.Module):
             self.bottleneck = nn.Sequential(*[
                 Bottleneck(
                     c_, c_, kernel_size, stride, padding, ratio, groups_ratio,
-                    dw_kernel_size, act, bn, mid_kernel_size=mid_kernel_size,
+                    dw_kernel_size, act, bn,
+                    mid_kernel_size=mid_kernel_size,
+                    mid_dw_kernel_size=mid_dw_kernel_size,
                 )
                 for _ in range(n)
             ])
@@ -415,6 +421,7 @@ class Backbone(nn.Module):
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
+        mid_dw_kernel_size: int | None = None,
         e: float = 1.0,
         bottleneck_type: str = "ghost",
         proj_type: str = "ghost",
@@ -433,6 +440,7 @@ class Backbone(nn.Module):
             groups_ratio=groups_ratio,
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
+            mid_dw_kernel_size=mid_dw_kernel_size,
             e=e,
             bottleneck_type=bottleneck_type,
             proj_type=proj_type,
@@ -579,6 +587,7 @@ class SGC_YOLOv5(nn.Module):
         kernel_size: int = 1,
         dw_kernel_size: int = 1,
         mid_kernel_size: int | None = None,
+        mid_dw_kernel_size: int | None = None,
         e: float = 1.0,
         vov_style: str = "split",
         bottleneck_type: str = "ghost",
@@ -600,6 +609,7 @@ class SGC_YOLOv5(nn.Module):
             kernel_size=kernel_size,
             dw_kernel_size=dw_kernel_size,
             mid_kernel_size=mid_kernel_size,
+            mid_dw_kernel_size=mid_dw_kernel_size,
             e=e,
             bottleneck_type=bottleneck_type,
             proj_type=proj_type,

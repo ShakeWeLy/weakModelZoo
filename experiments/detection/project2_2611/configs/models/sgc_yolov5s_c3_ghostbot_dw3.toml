@@ -1,0 +1,28 @@
+# 基于 c3_ghostbot：仅把 Bottleneck 第二层（3×3 段）廉价 DW 从 1→3；第一层 DW 仍为 1。
+# 对照：c3_ghostbot（mid_dw=1）
+
+[experiments]
+name = "2026-11-12_026_SGC_c3_ghostbot_dw3_s_V1"
+description = "c3_ghostbot but mid-layer Ghost DW=3 only"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_ghostbot_dw3"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+mid_dw_kernel_size = 3
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40
