@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# C3 拓扑消融（失败则停止）
-# 相对 m2l residual 拓扑，验证 SDGhost 改成 YOLO C3 双路 concat 后能否回升
-# 1  : Conv↓ + SDGhost(csp=yolo, proj=conv, dense-bot)   ≈ 应对齐 M/C3
-# 2  : 投影改为 Ghost GBS
-# 3  : Bottleneck 改为 Ghost
+# 从 c3topo_1 逐步加回 Ghost（每次只改一项）
+# A  : 仅 downsample=sghost
+# B  : 仅 bottleneck=ghost
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -13,9 +11,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_c3topo_1
-  sgc_yolov5s_c3topo_2
-  sgc_yolov5s_c3topo_3
+  sgc_yolov5s_c3_sgdown
+  sgc_yolov5s_c3_ghostbot
 )
 
 for m in "${MODELS[@]}"; do
@@ -27,4 +24,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "全部 C3 拓扑消融训练完成。"
+echo "全部 Ghost-back 消融训练完成。"

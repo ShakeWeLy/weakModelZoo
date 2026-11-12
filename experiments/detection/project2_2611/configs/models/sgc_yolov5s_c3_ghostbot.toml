@@ -1,0 +1,28 @@
+# 从 c3topo_1 加回 Ghost：仅把 Bottleneck dense→ghost；其余不变。
+# C3拓扑 + proj=conv + ghost-bot + Conv↓ + VOVGCSPYolo
+# 对照：c3topo_1（dense-bot）/ c3topo_3（ghost-bot+ghost-proj）
+
+[experiments]
+name = "2026-11-12_025_SGC_c3_ghostbot_s_V1"
+description = "Ghost-back B: c3topo_1 but bottleneck=ghost only"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_ghostbot"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40
