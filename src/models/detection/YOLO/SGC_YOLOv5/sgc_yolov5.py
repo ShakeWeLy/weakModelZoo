@@ -147,10 +147,13 @@ class SDGhost(nn.Module):
     """
     和SGhost结合, SGhostConv+SDGhost, 替换CSP1,2,3。
 
-    - ``e=1``（默认）：GBS1/2 与 Bottleneck 均在 ``out_channels`` 上（满通道）。
-    - ``e<1``（如 0.5）：YOLO C3 式窄通道 —
-      GBS1(1×1) 降维到 ``c_=int(out*e)`` → n×Bottleneck → GBS2(1×1) 升维回 out。
+    - ``e=1``（默认）：隐藏宽度 = ``out_channels``（满通道）。
+    - ``e<1``（如 0.5）：窄通道 ``c_=int(out*e)``。
     - ``bottleneck_type``: ``ghost`` 用 SGhost+DFC；``dense`` 用 YOLO 稠密 1×1→3×3 Bottleneck。
+    - ``proj_type``: ``ghost``=GBS；``conv``=标准 1×1 Conv。
+    - ``csp_style``:
+      - ``residual``（默认）：单路 GBS1 → (x+bottleneck) → GBS2
+      - ``yolo``：C3 双路 cv1/cv2 → cat → cv3（无外层整块残差）
     """
     def __init__(self,
                  in_channels,
@@ -168,6 +171,7 @@ class SDGhost(nn.Module):
                  e: float = 1.0,
                  bottleneck_type: str = "ghost",
                  proj_type: str = "ghost",
+                 csp_style: str = "residual",
                  ) -> None:
         super().__init__()
         if n < 1:
@@ -180,6 +184,10 @@ class SDGhost(nn.Module):
         ptype = str(proj_type).lower()
         if ptype not in {"ghost", "conv"}:
             raise ValueError(f"proj_type 须为 ghost/conv，当前 {proj_type!r}")
+        ctype = str(csp_style).lower()
+        if ctype not in {"residual", "yolo"}:
+            raise ValueError(f"csp_style 须为 residual/yolo，当前 {csp_style!r}")
+        self.csp_style = ctype
         # 隐藏宽度；e<1 时对齐 Ghost ratio（偶数通道更稳）
         c_ = int(out_channels * e)
         c_ = max(ratio, c_ - (c_ % ratio))
@@ -187,13 +195,6 @@ class SDGhost(nn.Module):
             c_ = out_channels
         self.hidden_channels = c_
 
-        # 投影：ghost=GBS；conv=标准 1×1（更接近 YOLO C3 的通道投影）
-        if ptype == "conv":
-            self.GBS1 = Conv(in_channels, c_, 1, 1)
-            self.GBS2 = Conv(c_, out_channels, 1, 1)
-        else:
-            self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-            self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
         if btype == "dense":
             self.bottleneck = nn.Sequential(*[
                 YoloBottleneck(c_, c_, shortcut=True, e=1.0) for _ in range(n)
@@ -207,7 +208,27 @@ class SDGhost(nn.Module):
                 for _ in range(n)
             ])
 
+        # 投影：ghost=GBS；conv=标准 1×1（更接近 YOLO C3 的通道投影）
+        if ctype == "yolo":
+            # C3：双路 in→c_，cat 后 2c_→out；投影固定 1×1
+            if ptype == "conv":
+                self.cv1 = Conv(in_channels, c_, 1, 1)
+                self.cv2 = Conv(in_channels, c_, 1, 1)
+                self.cv3 = Conv(2 * c_, out_channels, 1, 1)
+            else:
+                self.cv1 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
+                self.cv2 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
+                self.cv3 = GBS(2 * c_, out_channels, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
+        elif ptype == "conv":
+            self.GBS1 = Conv(in_channels, c_, 1, 1)
+            self.GBS2 = Conv(c_, out_channels, 1, 1)
+        else:
+            self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+            self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.csp_style == "yolo":
+            return self.cv3(torch.cat((self.bottleneck(self.cv1(x)), self.cv2(x)), dim=1))
         x = self.GBS1(x)
         x = x + self.bottleneck(x)
         x = self.GBS2(x)
@@ -398,6 +419,7 @@ class Backbone(nn.Module):
         bottleneck_type: str = "ghost",
         proj_type: str = "ghost",
         downsample_type: str = "sghost",
+        csp_style: str = "residual",
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
@@ -414,6 +436,7 @@ class Backbone(nn.Module):
             e=e,
             bottleneck_type=bottleneck_type,
             proj_type=proj_type,
+            csp_style=csp_style,
         )
 
         def _down(cin: int, cout: int) -> nn.Module:
@@ -561,6 +584,7 @@ class SGC_YOLOv5(nn.Module):
         bottleneck_type: str = "ghost",
         proj_type: str = "ghost",
         downsample_type: str = "sghost",
+        csp_style: str = "residual",
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -580,6 +604,7 @@ class SGC_YOLOv5(nn.Module):
             bottleneck_type=bottleneck_type,
             proj_type=proj_type,
             downsample_type=downsample_type,
+            csp_style=csp_style,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖

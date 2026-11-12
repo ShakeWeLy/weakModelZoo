@@ -1,0 +1,27 @@
+# C3 拓扑消融 1：相对 m2l_1，仅把 SDGhost 拓扑改为 YOLO C3 双路 concat。
+# Conv↓ + SDGhost(e=0.5, csp=yolo, proj=conv, dense-bot) + VOVGCSPYolo
+# 对照：m2l_1（residual 拓扑）/ stdbb_vovyolo（M，真 C3）
+
+[experiments]
+name = "2026-11-12_021_SGC_c3topo_1_s_V1"
+description = "C3topo step1: Conv-down + SDGhost(csp=yolo,proj=conv,dense-bot) + VOVGCSPYolo"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3topo_1"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "conv"
+bottleneck_type = "dense"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40

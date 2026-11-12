@@ -1,0 +1,27 @@
+# C3 拓扑消融 2：在 c3topo_1 上把投影改为 Ghost GBS。
+# Conv↓ + SDGhost(e=0.5, csp=yolo, proj=ghost, dense-bot) + VOVGCSPYolo
+# 对照：c3topo_1 / m2l_2
+
+[experiments]
+name = "2026-11-12_022_SGC_c3topo_2_s_V1"
+description = "C3topo step2: Conv-down + SDGhost(csp=yolo,proj=ghost,dense-bot) + VOVGCSPYolo"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3topo_2"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+dw_kernel_size = 1
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "conv"
+proj_type = "ghost"
+bottleneck_type = "dense"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40
