@@ -1,0 +1,28 @@
+# 单模态 FA/DTI（SwinTransformer3D）占位。对应 LitFA3DClassifier。
+
+[experiments]
+name = "001_swin3d_fa_V1"
+description = "2026-11-12 | Swin3D FA/DTI single-modality baseline | placeholder"
+
+[model]
+arch = "swin3d_fa"
+display_name = "swin3d_fa"
+
+[model.params]
+backbone = "swin3d_transformer"
+in_chans = 1
+embed_dim = 24
+window_size = [4, 4, 4]
+first_window_size = [2, 2, 2]
+patch_size = [2, 2, 2]
+depths = [2, 2, 6, 2]
+num_heads = [3, 6, 12, 24]
+clf_head = "clf_mlp"
+num_classes = 3
+
+[dataset]
+dataset_name = "FA3D"
+
+[quick.model.params]
+embed_dim = 12
+depths = [1, 1, 1, 1]

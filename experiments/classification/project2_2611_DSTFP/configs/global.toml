@@ -1,0 +1,69 @@
+# 全局配置：所有模型共享。configs/models/<model>.toml 中的同名键会覆盖这里的值。
+# 合并顺序: global → model → global.[quick] → model.[quick]（仅 --quick）→ CLI --epochs / --set
+#
+# 约定：
+#   - 布尔键即"开关"：true = 开启，false = 关闭。
+#   - 数值键若写 0 表示关闭，注释中会明确标出。
+#
+# 本项目布局（相对旧项目对调）：
+#   结果根目录 = <project>/runs/<display_name>/
+#   单次实验   = runs/<display_name>/<seq>_<tag>_V<n>/
+#   experiments.name 默认 = <seq>_<tag>_V1（不含日期；日期写在 description 开头）
+
+[experiments]
+runs_dir = "runs"            # 结果根目录名；最终路径 = <project>/runs/<display_name>/
+date = ""                    # 实验日期（YYYY-MM-DD）；留空 = 运行当天；写入 description / summary，不进 name
+name = ""                    # run 名称；留空则用 model.toml 的 name，或自动 <seq>_<display_name>_V1
+description = ""             # 建议以日期开头： "YYYY-MM-DD | ..."
+
+[dataset]
+# TODO: 对接 DSTFP 数据管线（fMRI 4D + FA/DTI 3D）
+# 占位：路径留空时训练入口应报清晰错误或走 mock
+fmri_data_dir = ""           # fMRI 预处理后的数据目录（占位）
+fa_data_dir = ""             # FA/DTI 预处理后的数据目录（占位）
+dataset_name = "Triple"      # 可选占位: Triple / FA3D / Multimodal（对齐 DSTFP/module）
+num_classes = 3              # tri_class：HC / prodromal PD / confirmed PD（占位）
+batch_size = 4
+num_workers = 4
+augment = true               # 开关：训练增强（占位，具体增强在 data.py 实现）
+
+[hyperparameters]
+optimizer = "adamw"          # 可选: sgd / adam / adamw
+learning_rate = 0.001
+weight_decay = 0.01
+momentum = 0.9               # 仅 sgd 使用
+num_epochs = 100
+lr_scheduler = "cosine"      # 可选: none / step / poly / cosine
+# lr_min = 1e-6
+
+[train]
+device = "cuda"              # 可选: cuda / cpu；CUDA 不可用时自动回退到 cpu
+seed = 1234
+amp = false                  # 开关：混合精度（仅 CUDA）
+grad_clip_norm = 0.0         # 梯度裁剪阈值；0 = 关闭
+limit_batches = 0            # 调试：每个 epoch 只跑前 N 个 batch；0 = 关闭
+pretraining = false          # 开关：对比学习预训练（占位，对齐 DSTFP Lit*Classifier）
+use_contrastive = false      # 开关：对比损失（需 pretraining=true）
+early_stopping = false
+early_stopping_patience = 30
+early_stopping_min_delta = 0.0
+tensorboard = true
+
+[test]
+device = "cuda"
+checkpoint = "best"          # best / last
+splits = ["val", "test"]
+save_predictions = false
+save_visualizations = false
+visualize_num = 16
+
+# --quick：快速冒烟测试，仅在 train.py --quick 时叠加
+[quick.hyperparameters]
+num_epochs = 2
+
+[quick.train]
+limit_batches = 2
+
+[quick.test]
+splits = ["val"]
+visualize_num = 2

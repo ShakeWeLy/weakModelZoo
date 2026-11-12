@@ -1,0 +1,29 @@
+# 单模态 fMRI（SwinTransformer4D）占位。对应 LitClassifier + swin4d_ver7。
+
+[experiments]
+name = "001_swin4d_fmri_V1"
+description = "2026-11-12 | Swin4D fMRI single-modality baseline | placeholder"
+
+[model]
+arch = "swin4d_fmri"
+display_name = "swin4d_fmri"
+
+[model.params]
+backbone = "swin4d_ver7"
+in_chans = 1
+embed_dim = 24
+window_size = [4, 4, 4, 4]
+first_window_size = [2, 2, 2, 2]
+patch_size = [5, 5, 5, 1]
+depths = [2, 2, 6, 2]
+num_heads = [3, 6, 12, 24]
+c_multiplier = 2
+clf_head = "clf_mlp"
+num_classes = 3
+
+[dataset]
+dataset_name = "Triple"
+
+[quick.model.params]
+embed_dim = 12
+depths = [1, 1, 1, 1]
