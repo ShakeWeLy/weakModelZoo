@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[5]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

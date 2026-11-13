@@ -1,4 +1,4 @@
-"""Vision Transformer 与 Swin Transformer。"""
+"""Vision Transformer 变体。"""
 
 from .deit import DeiT
 from .pvt import PVT
