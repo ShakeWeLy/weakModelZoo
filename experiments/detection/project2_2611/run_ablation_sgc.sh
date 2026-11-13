@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 续：mid_dw=7；以及 sgdown + ghostbot(mid_dw=5)
+# sgdown + ghost-bot(mid_dw=7)
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
 
@@ -9,8 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_c3_ghostbot_dw7
-  sgc_yolov5s_c3_sgdown_gbot_dw5
+  sgc_yolov5s_c3_sgdown_gbot_dw7
 )
 
 for m in "${MODELS[@]}"; do
