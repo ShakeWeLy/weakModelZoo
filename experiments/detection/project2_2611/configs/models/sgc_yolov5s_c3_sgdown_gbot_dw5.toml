@@ -1,0 +1,29 @@
+# 在 c3_sgdown 基础上再加 ghost-bot，且 3×3 段廉价 DW=5。
+# C3拓扑 + proj=conv + ghost-bot(mid_dw=5) + SGhost↓ + VOVGCSPYolo
+# 对照：c3_sgdown（dense-bot）/ c3_ghostbot_dw5（Conv↓）
+
+[experiments]
+name = "2026-11-13_029_SGC_c3_sgdown_gbot_dw5_s_V1"
+description = "c3_sgdown + ghost-bot with mid-layer Ghost DW=5"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_sgdown_gbot_dw5"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+mid_dw_kernel_size = 5
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "sghost"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40
