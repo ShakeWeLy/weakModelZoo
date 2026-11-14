@@ -109,14 +109,15 @@ class WindowAttention3D(nn.Module):
         )  # [3, w, w, w]
         coords_flatten = torch.flatten(coords, 1)  # [3, w^3]
         # relative_coords[axis, i, j] = coords_i - coords_j
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # [w^3, w^3, 3]
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # token_i - token_j, 第一维的0,1,2 代表xyz, 第二维和第三维是两个token
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # [w^3, w^3, 3]  w^3就是3D窗口内的每一个位置的token, 只是被展平了, 第三维是三个轴的差值
 
         # 平移成非负，再用混合进制压成一维索引
-        relative_coords[:, :, 0] += window_size - 1
+        relative_coords[:, :, 0] += window_size - 1  # 最小为上面说的 -(w-1), 所以逐行加上
         relative_coords[:, :, 1] += window_size - 1
         relative_coords[:, :, 2] += window_size - 1
-        relative_coords[:, :, 0] *= (2 * window_size - 1) ** 2
+
+        relative_coords[:, :, 0] *= (2 * window_size - 1) ** 2  # 偏置表是一维的, 为了区分xyz是不同位置, 类似进位
         relative_coords[:, :, 1] *= 2 * window_size - 1
         self.register_buffer(
             "relative_position_index",
@@ -128,7 +129,7 @@ class WindowAttention3D(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)
+        nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)  # 初始化
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         batch_size, seq_len, channels = x.shape
@@ -138,9 +139,9 @@ class WindowAttention3D(nn.Module):
         q, k, v = qkv
         attn = (q * self.scale) @ k.transpose(-2, -1)
 
-        # 查表得到相对位置偏置并加到注意力分数上
+        # 查表得到可学习的相对位置偏置并加到注意力分数上
         bias = self.relative_position_bias_table[
-            self.relative_position_index.reshape(-1)
+            self.relative_position_index.reshape(-1)  # 展平, 相当于把相对坐标映射到偏置表的下标
         ].reshape(seq_len, seq_len, self.num_heads).permute(2, 0, 1)
         attn = attn + bias.unsqueeze(0)
 
