@@ -14,18 +14,38 @@ from .swinTransformer import (
     window_partition,
     window_reverse,
 )
+from .swinTransformer3D import (
+    PatchExpanding3D,
+    PatchMerging3D,
+    ShiftedWindowAttention3D,
+    SwinTransformerBlock3D,
+    WindowAttention3D,
+    WindowAttentionLayer3D,
+    build_shifted_window_attn_mask_3D,
+    window_partition_3D,
+    window_reverse_3D,
+)
 
 __all__ = [
     "DropPath",
     "FinalPatchExpanding",
     "Mlp",
     "PatchExpanding",
+    "PatchExpanding3D",
     "PatchMerging",
+    "PatchMerging3D",
     "ShiftedWindowAttention",
+    "ShiftedWindowAttention3D",
     "SwinTransformerBlock",
+    "SwinTransformerBlock3D",
     "WindowAttention",
+    "WindowAttention3D",
     "WindowAttentionLayer",
+    "WindowAttentionLayer3D",
     "build_shifted_window_attn_mask",
+    "build_shifted_window_attn_mask_3D",
     "window_partition",
+    "window_partition_3D",
     "window_reverse",
+    "window_reverse_3D",
 ]
