@@ -203,6 +203,29 @@ class Mlp(nn.Module):
         return self.drop(x)
 
 
+class PatchEmbed(nn.Module):
+    """
+    是什么：Patch Embedding，把图像切成 patch_size×patch_size 的不重叠小块并线性投影为 token。
+    为什么：论文中 stage1 的 token 对应 4×4 像素块而不是单个像素，窗口注意力的 token 数因此降低。
+    做了什么：[B, C_in, H, W] -> [B, H/p, W/p, embed_dim]（通道在最后，与 block 的布局一致）。
+    实现：kernel=stride=p 的卷积等价于「切块 + 线性投影」。
+    """
+
+    def __init__(self, in_chans: int = 3, embed_dim: int = 96, patch_size: int = 4, norm: bool = True):
+        super().__init__()
+        self.patch_size = patch_size
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.norm = nn.LayerNorm(embed_dim) if norm else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, _, height, width = x.shape
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
+            raise ValueError(f"H/W 必须能被 patch_size 整除，当前为 ({height}, {width}), patch_size={self.patch_size}")
+        x = self.proj(x)  # [B, C, H/p, W/p]
+        x = x.permute(0, 2, 3, 1).contiguous()  # [B, H/p, W/p, C]
+        return self.norm(x)
+
+
 class PatchMerging(nn.Module):
     """将 2×2 邻域 patch 合并，空间分辨率减半、通道数翻倍。输入输出均为 [B, H, W, C]。"""
 
@@ -359,3 +382,5 @@ if __name__ == "__main__":
     print("block:", block(x).shape)
     print("shifted block:", shifted_block(x).shape)
     print("patch merge:", merge(x).shape)
+    embed = PatchEmbed(in_chans=3, embed_dim=64, patch_size=4)
+    print("patch embed:", embed(torch.randn(2, 3, 32, 32)).shape)  # [2, 8, 8, 64]

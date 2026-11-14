@@ -306,6 +306,31 @@ class Mlp(nn.Module):
         return self.drop(x)
 
 
+class PatchEmbed3D(nn.Module):
+    """
+    是什么：3D Patch Embedding，把体数据切成 patch_size³ 的不重叠体块并线性投影为 token。
+    为什么：与 2D 一致，窗口注意力的 token 应对应体块而不是单个体素，降低 token 数。
+    做了什么：[B, C_in, H, W, D] -> [B, H/p, W/p, D/p, embed_dim]（通道在最后）。
+    实现：kernel=stride=p 的 Conv3d 等价于「切块 + 线性投影」。
+    """
+
+    def __init__(self, in_chans: int = 1, embed_dim: int = 96, patch_size: int = 4, norm: bool = True):
+        super().__init__()
+        self.patch_size = patch_size
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.norm = nn.LayerNorm(embed_dim) if norm else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, _, height, width, depth = x.shape
+        if height % self.patch_size != 0 or width % self.patch_size != 0 or depth % self.patch_size != 0:
+            raise ValueError(
+                f"H/W/D 必须能被 patch_size 整除，当前为 ({height}, {width}, {depth}), patch_size={self.patch_size}"
+            )
+        x = self.proj(x)  # [B, C, H/p, W/p, D/p]
+        x = x.permute(0, 2, 3, 4, 1).contiguous()  # [B, H/p, W/p, D/p, C]
+        return self.norm(x)
+
+
 class PatchMerging3D(nn.Module):
     """
     是什么：3D Patch Merging 下采样。
@@ -457,3 +482,5 @@ if __name__ == "__main__":
     merged = merge(x)
     print("patch merge:", merged.shape)
     print("patch expand:", expand(merged).shape)
+    embed = PatchEmbed3D(in_chans=1, embed_dim=64, patch_size=2)
+    print("patch embed:", embed(torch.randn(2, 1, 8, 8, 8)).shape)  # [2, 4, 4, 4, 64]

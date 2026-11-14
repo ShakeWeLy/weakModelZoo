@@ -313,6 +313,36 @@ class Mlp(nn.Module):
         return self.drop(x)
 
 
+class PatchEmbed4D(nn.Module):
+    """
+    是什么：4D Patch Embedding，把超体数据切成 patch_size⁴ 的不重叠超块并线性投影为 token。
+    为什么：PyTorch 没有 Conv4d，因此用「reshape 切块 + Linear」实现，与 kernel=stride=p 的卷积等价。
+    做了什么：[B, C_in, T, H, W, D] -> [B, T/p, H/p, W/p, D/p, embed_dim]（通道在最后）。
+    """
+
+    def __init__(self, in_chans: int = 1, embed_dim: int = 96, patch_size: int = 4, norm: bool = True):
+        super().__init__()
+        self.in_chans = in_chans
+        self.patch_size = patch_size
+        self.proj = nn.Linear(in_chans * patch_size ** 4, embed_dim)
+        self.norm = nn.LayerNorm(embed_dim) if norm else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, channels, time, height, width, depth = x.shape
+        p = self.patch_size
+        if channels != self.in_chans:
+            raise ValueError(f"输入通道应为 {self.in_chans}，当前为 {channels}")
+        if time % p != 0 or height % p != 0 or width % p != 0 or depth % p != 0:
+            raise ValueError(
+                f"T/H/W/D 必须能被 patch_size 整除，当前为 ({time}, {height}, {width}, {depth}), patch_size={p}"
+            )
+        # 把每个轴拆成 (块数, 块内坐标)，再把块内坐标全部移到最后展平
+        x = x.view(batch_size, channels, time // p, p, height // p, p, width // p, p, depth // p, p)
+        x = x.permute(0, 2, 4, 6, 8, 1, 3, 5, 7, 9).contiguous()
+        x = x.view(batch_size, time // p, height // p, width // p, depth // p, channels * p ** 4)
+        return self.norm(self.proj(x))
+
+
 class PatchMerging4D(nn.Module):
     """
     是什么：4D Patch Merging 下采样。
@@ -470,3 +500,5 @@ if __name__ == "__main__":
     merged = merge(x)
     print("patch merge:", merged.shape)
     print("patch expand:", expand(merged).shape)
+    embed = PatchEmbed4D(in_chans=1, embed_dim=32, patch_size=2)
+    print("patch embed:", embed(torch.randn(1, 1, 4, 4, 4, 4)).shape)  # [1, 2, 2, 2, 2, 32]

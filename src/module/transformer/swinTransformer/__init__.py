@@ -4,6 +4,7 @@ from .swinTransformer import (
     DropPath,
     FinalPatchExpanding,
     Mlp,
+    PatchEmbed,
     PatchExpanding,
     PatchMerging,
     ShiftedWindowAttention,
@@ -15,6 +16,7 @@ from .swinTransformer import (
     window_reverse,
 )
 from .swinTransformer3D import (
+    PatchEmbed3D,
     PatchExpanding3D,
     PatchMerging3D,
     ShiftedWindowAttention3D,
@@ -26,6 +28,7 @@ from .swinTransformer3D import (
     window_reverse_3D,
 )
 from .swinTransformer4D import (
+    PatchEmbed4D,
     PatchExpanding4D,
     PatchMerging4D,
     ShiftedWindowAttention4D,
@@ -41,6 +44,9 @@ __all__ = [
     "DropPath",
     "FinalPatchExpanding",
     "Mlp",
+    "PatchEmbed",
+    "PatchEmbed3D",
+    "PatchEmbed4D",
     "PatchExpanding",
     "PatchExpanding3D",
     "PatchExpanding4D",
