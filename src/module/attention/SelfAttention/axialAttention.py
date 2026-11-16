@@ -122,7 +122,7 @@ class AFL(nn.Module):
         print(f_x_fmri.shape)
         print(f_x_dti.shape)
 
-        f_x_fmri_p = global_max_pool(f_x_fmri, 4)
+        f_x_fmri_p = global_max_pool(f_x_fmri, 4)  
         f_x_dti_p = global_max_pool(f_x_dti, 4)
 
         # fussion
@@ -130,7 +130,7 @@ class AFL(nn.Module):
         # print(self.learnable_weight.shape)  # 忘记赋值回去了!
         W = self.learnable_weight.view(1,self.embed_dim,1,1,1,1 )  # [B,C,D,W,H,T]
         print(W.shape)
-        f_fusion = (f_x_fmri_p * W) + f_x_dti_p * (1 - W)
+        f_fusion = (f_x_fmri_p * W) * f_x_fmri + f_x_dti_p * (1 - W) * f_x_dti  # 这里已修改， 忘记乘上原f了
         return f_fusion
 
 if __name__ == "__main__":

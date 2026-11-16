@@ -437,6 +437,17 @@ class SwinTransformerBlock4D(nn.Module):
     是什么：Swin 4D 基本块。
     为什么：Pre-Norm + 残差稳定深层训练；W-MSA / SW-MSA 交替实现局部+跨窗建模。
     做了什么：LN → W-MSA/SW-MSA → 残差 → LN → MLP → 残差。
+    Args:
+        embed_dim: int 注意力机制的纬度，
+        num_heads: int 注意力机制的头数，
+        window_size: int 窗口的大小，
+        shift_size: int 窗口的偏移量，
+        mlp_ratio: float MLP的比例，
+        drop: float 丢弃率，
+        attn_drop: float 注意力机制的丢弃率，
+        drop_path: float 残差路径的丢弃率，
+        qkv_bias: bool 是否使用偏置，
+        qk_scale: float | None 是否使用缩放，
     """
 
     def __init__(
