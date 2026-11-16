@@ -1,7 +1,6 @@
-from re import X
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 from src.module.transformer.swinTransformer import SwinTransformerBlock3D, SwinTransformerBlock4D
 from src.module.attention import  AFL

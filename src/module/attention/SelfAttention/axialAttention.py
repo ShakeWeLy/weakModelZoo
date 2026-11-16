@@ -32,18 +32,16 @@ class AxialSelfAttention(nn.Module):
         B, C, D, H, W, T = x.shape
 
         if self.axia_num == 0:      # 对 D 做注意力
-            # (B, D, H, W, T, C) -> (B*H*W*T, D, C)
-            x_ = x.permute(0, 2, 3, 4, 5, 1).reshape(B * H * W * T, D, C)
+            # (B, C, D, H, W, T) -> (B, H, W, T, D, C) -> (B*H*W*T, D, C)
+            x_ = x.permute(0, 3, 4, 5, 2, 1).reshape(B * H * W * T, D, C)
             N = D
         elif self.axia_num == 1:    # 对 H 做注意力
-            # (B, D, H, W, T, C) -> (B*D*W*T, H, C)
-            x_ = x.permute(0, 2, 3, 4, 5, 1).reshape(B, D, H, W, T, C)
-            x_ = x_.permute(0, 1, 3, 4, 5, 2).reshape(B * D * W * T, H, C)
+            # (B, C, D, H, W, T) -> (B, D, W, T, H, C) -> (B*D*W*T, H, C)
+            x_ = x.permute(0, 2, 4, 5, 3, 1).reshape(B * D * W * T, H, C)
             N = H
         elif self.axia_num == 2:    # 对 W 做注意力
-            # (B, D, H, W, T, C) -> (B*D*H*T, W, C)
-            x_ = x.permute(0, 2, 3, 4, 5, 1).reshape(B, D, H, W, T, C)
-            x_ = x_.permute(0, 1, 2, 4, 5, 3).reshape(B * D * H * T, W, C)
+            # (B, C, D, H, W, T) -> (B, D, H, T, W, C) -> (B*D*H*T, W, C)
+            x_ = x.permute(0, 2, 3, 5, 4, 1).reshape(B * D * H * T, W, C)
             N = W
         else:
             raise ValueError(f"axia_num must be 0/1/2, got {self.axia_num}")
@@ -59,6 +57,7 @@ class AxialSelfAttention(nn.Module):
         attn = torch.softmax(attn, dim=-1)
         out = torch.matmul(attn, v)                                  # (batch, heads, N, head_dim)
         out = out.transpose(1, 2).reshape(batch, N, C)               # (batch, N, C)
+        out = self.proj(out)                                         # 输出投影
 
         # 还原
         if self.axia_num == 0:
@@ -101,13 +100,13 @@ class AFL(nn.Module):
             x_fmri: (B, C, D, H, W, T)
             x_dti: (B, C, D, H, W)
         Returns:
-            x: (B, C, H, W)
+            x: (B, C, D, H, W, T)
         '''
         # 进行dti到fmri对齐
         _, _, _, _, _, T = x_fmri.shape
         x_dti = x_dti.unsqueeze(dim=-1).repeat(1,1,1,1,1,T)
-        print(x_dti.shape)
-        print(x_fmri.shape)
+        # print(x_dti.shape)
+        # print(x_fmri.shape)
 
         # 进行归一化
         x_fmri = self.norm_fmri(x_fmri.permute(0,2,3,4,5,1)).permute(0,5,1,2,3,4)
@@ -116,11 +115,11 @@ class AFL(nn.Module):
         # 进行注意力计算
         # f_x_fmri = self.attention_fmri_d(self.attention_fmri_h(self.attention_fmri_w(x_fmri)))
         # f_x_dti = self.attention_dti_d(self.attention_dti_h(self.attention_dti_w(x_dti)))
-        f_x_fmri = self.attention_dti_w(self.attention_dti_h(x_fmri))  # 没有D纬度的注意力
+        f_x_fmri = self.attention_fmri_w(self.attention_fmri_h(x_fmri))  # 没有D纬度的注意力
         f_x_dti = self.attention_dti_w(self.attention_dti_h(x_dti))  # 没有D纬度的注意力
 
-        print(f_x_fmri.shape)
-        print(f_x_dti.shape)
+        # print(f_x_fmri.shape)
+        # print(f_x_dti.shape)
 
         f_x_fmri_p = global_max_pool(f_x_fmri, 4)  
         f_x_dti_p = global_max_pool(f_x_dti, 4)
@@ -129,7 +128,7 @@ class AFL(nn.Module):
         # self.learnable_weight = self.learnable_weight.view(1,self.embed_dim,1,1,1,1 )  # [B,C,D,W,H,T] 
         # print(self.learnable_weight.shape)  # 忘记赋值回去了!
         W = self.learnable_weight.view(1,self.embed_dim,1,1,1,1 )  # [B,C,D,W,H,T]
-        print(W.shape)
+        # print(W.shape)
         f_fusion = (f_x_fmri_p * W) * f_x_fmri + f_x_dti_p * (1 - W) * f_x_dti  # 这里已修改， 忘记乘上原f了
         return f_fusion
 
