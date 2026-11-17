@@ -112,8 +112,12 @@ class Bottleneck(nn.Module):
                 bn=F.batch_norm,
                 mid_kernel_size: int | None = None,
                 mid_dw_kernel_size: int | None = None,
+                use_dfc: bool = True,
+                res_type: str = "dw",
                 ) -> None:
         super().__init__()
+        if res_type not in ("dw", "identity"):
+            raise ValueError(f"res_type 须为 dw/identity，当前 {res_type!r}")
         if in_channels != out_channels:
             raise ValueError("Bottleneck 要求 in_channels == out_channels（DFC 注意力作用在输入上，需与 x1 通道一致）")
         # YOLO 的 Bottleneck 都是 stride=1，下采样由单独的卷积层完成，这里不支持 stride != 1
@@ -128,16 +132,17 @@ class Bottleneck(nn.Module):
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw2, act=act, bn=bn)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
-        self.DFCAttention = DFCAttention(in_channels)
-        # 残差支路的深度卷积固定 3×3，不随主卷积 kernel 变化（主卷积已改为 1×1）
-        self.DWConv2 = BaseConv(out_channels, out_channels, 3, stride, groups=out_channels, act=act, bn=bn)
+        # use_dfc=False：去掉 DFC 门控（消融）；关闭时 x = x1，不创建 DFCAttention
+        self.DFCAttention = DFCAttention(in_channels) if use_dfc else None
+        # res_type="dw"（默认）：残差支路为 3×3 深度卷积；"identity"：恒等捷径（消融）
+        self.DWConv2 = (BaseConv(out_channels, out_channels, 3, stride, groups=out_channels, act=act, bn=bn)
+                        if res_type == "dw" else None)
         # self.Conv = BaseConv(in_channels, out_channels, kernel_size, stride, act=act, bn=bn)  # stride=2 分支专用，已注释
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        res = self.DWConv2(x)
+        res = x if self.DWConv2 is None else self.DWConv2(x)
         x1 = self.SGhostConv1(x)
-        x2 = self.DFCAttention(x)
-        x = x1*x2
+        x = x1 if self.DFCAttention is None else x1 * self.DFCAttention(x)
 
         # if self.stride == 2:  # YOLO 无此结构，已注释
         #     x = self.DWConv1(x)
@@ -176,6 +181,8 @@ class SDGhost(nn.Module):
                  bottleneck_type: str = "ghost",
                  proj_type: str = "ghost",
                  csp_style: str = "residual",
+                 use_dfc: bool = True,
+                 res_type: str = "dw",
                  ) -> None:
         super().__init__()
         if n < 1:
@@ -210,6 +217,8 @@ class SDGhost(nn.Module):
                     dw_kernel_size, act, bn,
                     mid_kernel_size=mid_kernel_size,
                     mid_dw_kernel_size=mid_dw_kernel_size,
+                    use_dfc=use_dfc,
+                    res_type=res_type,
                 )
                 for _ in range(n)
             ])
@@ -400,13 +409,14 @@ class CBAM(nn.Module):
     '''
     CBAM注意力模块
     '''
-    def __init__(self, channels: int, reduction_ratio: int = 16, spatial_kernel: int = 7):
+    def __init__(self, channels: int, reduction_ratio: int = 16, spatial_kernel: int = 7, spatial: bool = True):
         super().__init__()
-        # 先通道注意力，再空间注意力（与 CBAM 论文一致）
+        # 先通道注意力，再空间注意力（与 CBAM 论文一致）；spatial=False 时只保留通道注意力（CAM-only）
         self.channel_attention = CAM(channels, reduction_ratio=reduction_ratio)
-        self.spatial_attention = SAM(kernel_size=spatial_kernel)
+        self.spatial_attention = SAM(kernel_size=spatial_kernel) if spatial else None
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.spatial_attention(self.channel_attention(x))
+        x = self.channel_attention(x)
+        return x if self.spatial_attention is None else self.spatial_attention(x)
 
 
 class Backbone(nn.Module):
@@ -427,6 +437,8 @@ class Backbone(nn.Module):
         proj_type: str = "ghost",
         downsample_type: str = "sghost",
         csp_style: str = "residual",
+        use_dfc: bool = True,
+        res_type: str = "dw",
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
@@ -445,6 +457,8 @@ class Backbone(nn.Module):
             bottleneck_type=bottleneck_type,
             proj_type=proj_type,
             csp_style=csp_style,
+            use_dfc=use_dfc,
+            res_type=res_type,
         )
 
         def _down(cin: int, cout: int) -> nn.Module:
@@ -502,6 +516,7 @@ class Neck(nn.Module):
         dw_kernel_size: int = 3,
         mid_kernel_size: int | None = None,
         vov_style: str = "split",
+        cbam_mode: str = "full",
     ) -> None:
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
@@ -542,9 +557,17 @@ class Neck(nn.Module):
         self.c3_n5 = _vov(c4 + c4, c5, s.n(3))
 
         self.out_channels = (c3, c4, c5)
-        self.cbam_p3 = CBAM(c3)
-        self.cbam_p4 = CBAM(c4)
-        self.cbam_p5 = CBAM(c5)
+        # cbam_mode：full（默认，三尺度完整 CBAM）/ cam_p3（P3 去掉 SAM，P4/P5 仍完整）/ none（无 CBAM）
+        mode = str(cbam_mode).lower()
+        if mode == "full":
+            self.cbam_p3, self.cbam_p4, self.cbam_p5 = CBAM(c3), CBAM(c4), CBAM(c5)
+        elif mode == "cam_p3":
+            self.cbam_p3 = CBAM(c3, spatial=False)
+            self.cbam_p4, self.cbam_p5 = CBAM(c4), CBAM(c5)
+        elif mode == "none":
+            self.cbam_p3, self.cbam_p4, self.cbam_p5 = nn.Identity(), nn.Identity(), nn.Identity()
+        else:
+            raise ValueError(f"未知 cbam_mode={cbam_mode!r}（可选 full / cam_p3 / none）")
 
     def forward(
         self, p3: torch.Tensor, p4: torch.Tensor, p5: torch.Tensor
@@ -594,6 +617,9 @@ class SGC_YOLOv5(nn.Module):
         proj_type: str = "ghost",
         downsample_type: str = "sghost",
         csp_style: str = "residual",
+        use_dfc: bool = True,
+        res_type: str = "dw",
+        cbam_mode: str = "full",
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -615,6 +641,8 @@ class SGC_YOLOv5(nn.Module):
             proj_type=proj_type,
             downsample_type=downsample_type,
             csp_style=csp_style,
+            use_dfc=use_dfc,
+            res_type=res_type,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
@@ -630,6 +658,7 @@ class SGC_YOLOv5(nn.Module):
             dw_kernel_size=neck_dw,
             mid_kernel_size=mid_kernel_size,
             vov_style=vov_style,
+            cbam_mode=cbam_mode,
         )
         self.detect = Detect(nc, self.neck.out_channels, anchors)
 

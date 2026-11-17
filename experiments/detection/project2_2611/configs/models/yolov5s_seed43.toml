@@ -1,0 +1,18 @@
+# YOLOv5s 噪声基线：与 yolov5s 相同，仅 seed=43，40 epoch（与 SGC 系列的 40 epoch 预算对齐）。
+
+[experiments]
+name = "2026-11-17_003_YOLOv5s_seed43_V1"
+description = "YOLOv5s | seed 43 (noise baseline) | 40 epochs"
+
+[model]
+arch = "yolov5"
+display_name = "YOLOv5"
+
+[model.params]
+variant = "s"
+
+[hyperparameters]
+num_epochs = 40
+
+[train]
+seed = 43

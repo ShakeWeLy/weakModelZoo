@@ -1,0 +1,32 @@
+# 结构消融 CBAM-cam_p3：P3 去掉 SAM（只保留通道注意力 CAM），P4/P5 仍为完整 CBAM（40 epoch，seed 42）。
+# 用于回答：P3 上的空间注意力（SAM）是否伤害小目标。
+
+[experiments]
+name = "2026-11-17_006_SGC_c3_sgdown_gbot_dw5_s_cbamCamP3_V1"
+description = "c3_sgdown + ghost-bot dw5 | P3 CAM-only (no SAM), P4/P5 full CBAM | 40 epochs"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_sgdown_gbot_dw5"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+mid_dw_kernel_size = 5
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "sghost"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+cbam_mode = "cam_p3"
+
+[hyperparameters]
+num_epochs = 40
+
+[train]
+seed = 42
