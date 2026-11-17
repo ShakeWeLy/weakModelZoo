@@ -74,3 +74,9 @@ Swin-Unet/model_out/log.txt
 # ============================================================
 # github source
 *-main/
+
+# ============================================================
+# 服务器训练脚本的本地产物（队列日志、打包结果，不入库）
+# ============================================================
+experiments/detection/project2_2611/server/logs/
+experiments/detection/project2_2611/server/results/

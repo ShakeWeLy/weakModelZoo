@@ -1,0 +1,9 @@
+# 服务器依赖（Python 3.12.12）。torch / torchvision 由 setup_env.sh 从 PyTorch 官方 CUDA 源安装（2.6.0 / 0.21.0，与本机一致）。
+# 其余版本与本机 base 环境保持一致，便于复现。
+numpy==1.26.4
+pillow==12.2.0
+matplotlib==3.9.2
+PyYAML==6.0.1
+tensorboard==2.21.0
+protobuf==6.33.5
+opencv-python-headless==4.10.0.84

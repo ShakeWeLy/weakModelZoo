@@ -1,0 +1,10 @@
+# 服务器训练清单。以 # 开头的行会被忽略。
+# 字段：name 实验名（run 目录为 <前缀>_<name>）；model 对应 configs/models/<model>.toml；
+#       seed 写入 train.seed；epochs 留空 = 配置默认；enabled 1 运行 / 0 跳过；
+#       overrides 用分号分隔的 KEY=VALUE（等价于 train.py --set），不要用逗号。
+# 当前内容：噪声基线（每个配置新增 seed 43、44，40 epoch；本机已有 seed 42 结果）。
+name,model,seed,epochs,enabled,overrides
+ours_c3sgdown_gbot_dw5_s43,sgc_yolov5s_c3_sgdown_gbot_dw5,43,40,1,
+ours_c3sgdown_gbot_dw5_s44,sgc_yolov5s_c3_sgdown_gbot_dw5,44,40,1,
+yolov5s_s43,yolov5s,43,40,1,
+yolov5s_s44,yolov5s,44,40,1,
