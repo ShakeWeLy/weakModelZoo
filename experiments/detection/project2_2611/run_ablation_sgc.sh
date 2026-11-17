@@ -9,6 +9,7 @@
 #
 #   ir0625  r=0.625（5/8）  seed 42 / 43 / 44
 #   ir075   r=0.75（3/4）   seed 42 / 43 / 44
+#   nodfc_cbam_none  去 DFC + 去 CBAM 组合（约 4.69M）  seed 42 / 43 / 44
 #
 # 注意：同配置重复训练的验证 mAP50-95 相差 0.25–1.8 点，单 seed 的差异不可靠，需看三个 seed 的均值。
 # 队列按 seed 成对排列（每个 seed 先跑 0.625 再跑 0.75），中途中断时两组对比仍然对齐。
@@ -22,12 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir0625
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir075
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir0625_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir075_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir0625_seed44
-  sgc_yolov5s_c3_sgdown_gbot_dw5_ir075_seed44
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed43
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed44
 )
 
 for m in "${MODELS[@]}"; do
