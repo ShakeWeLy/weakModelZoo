@@ -24,6 +24,13 @@ class GhostConv(nn.Module):
         dw_kernel_size: 廉价深度卷积的核大小，默认 3
         act: 激活函数配置
         bn: 归一化配置
+        intrinsic_ratio: 本征通道占比 r（0 < r < 1），默认 None。
+            None 时沿用 ratio：本征 = ceil(out / ratio)，占比即 1 / ratio（原行为，不变）。
+            给定时直接按占比切分：本征 = ceil(out * r)，幽灵 = out - 本征，总通道恰为 out；
+            ratio 此时不参与通道计算（如 r=0.625 无法用整数 ratio 表示）。
+            幽灵分支的深度卷积要求 cheap 是 identity 的整数倍，否则改用
+            groups = gcd(identity, cheap) 的分组卷积；r=0.5 时 identity == cheap，
+            groups == identity，即与 ratio=2 的深度卷积完全一致。
     """
 
     def __init__(
@@ -37,21 +44,32 @@ class GhostConv(nn.Module):
         dw_kernel_size: int = 3,
         act: ActArg = True,
         bn: NormArg = True,
+        intrinsic_ratio: float | None = None,
     ) -> None:
         super().__init__()
 
-        # [修复] ratio=1 时 cheap_num = 0, 卷积权重为空, PyTorch 只会报
-        # "expected weight to be at least 1 at dimension 0" 这类难以理解的错误。
-        # 这里提前校验, 并给出明确提示。
-        if ratio < 2:
-            raise ValueError("ratio 必须 >= 2")
-
         self.out_channels = out_channels
-        # 本征通道数向上取整, 保证 identity_num * ratio >= out_channels。
-        # 当 out_channels 不能被 ratio 整除时, 多出来的通道会在 forward 里被切掉。
-        self.identity_num = math.ceil(out_channels / ratio)
-        # 廉价分支输出通道 = 本征通道 * (ratio - 1), 与本征通道拼接后总数为 identity_num * ratio
-        self.cheap_num = self.identity_num * (ratio - 1)
+        if intrinsic_ratio is None:
+            # [修复] ratio=1 时 cheap_num = 0, 卷积权重为空, PyTorch 只会报
+            # "expected weight to be at least 1 at dimension 0" 这类难以理解的错误。
+            # 这里提前校验, 并给出明确提示。
+            if ratio < 2:
+                raise ValueError("ratio 必须 >= 2")
+            # 本征通道数向上取整, 保证 identity_num * ratio >= out_channels。
+            # 当 out_channels 不能被 ratio 整除时, 多出来的通道会在 forward 里被切掉。
+            self.identity_num = math.ceil(out_channels / ratio)
+            # 廉价分支输出通道 = 本征通道 * (ratio - 1), 与本征通道拼接后总数为 identity_num * ratio
+            self.cheap_num = self.identity_num * (ratio - 1)
+            cheap_groups = self.identity_num
+        else:
+            if not 0 < intrinsic_ratio < 1:
+                raise ValueError(f"intrinsic_ratio 须在 (0, 1)，当前 {intrinsic_ratio}")
+            # round(..., 6) 避免浮点误差让 ceil 多进一位（如 out * 0.75 的结果本应为整数）
+            self.identity_num = max(1, math.ceil(round(out_channels * intrinsic_ratio, 6)))
+            self.cheap_num = out_channels - self.identity_num
+            if self.cheap_num < 1:
+                raise ValueError(f"intrinsic_ratio={intrinsic_ratio} 与 out_channels={out_channels} 不兼容（幽灵通道为 0）")
+            cheap_groups = math.gcd(self.identity_num, self.cheap_num)
 
         # 主卷积: 负责下采样 (stride 在这里生效)
         self.conv = BaseConv(
@@ -76,7 +94,7 @@ class GhostConv(nn.Module):
             kernel_size=dw_kernel_size,
             stride=1,
             padding=dw_kernel_size // 2,  # 与主卷积解耦：深度卷积的 padding 由自己的 kernel 决定
-            groups=self.identity_num,
+            groups=cheap_groups,
             act=act,
             bn=bn,
         )

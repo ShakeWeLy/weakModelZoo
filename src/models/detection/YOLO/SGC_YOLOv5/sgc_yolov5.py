@@ -36,10 +36,11 @@ class SGhostConv(GhostConv):
                 dw_kernel_size=3,
                 act=True,
                 bn=True,
+                intrinsic_ratio=None,
                 ):
         super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                          stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
-                         act=act, bn=bn)
+                         act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
         self.groups = _shuffle_groups(out_channels, groups_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -62,11 +63,12 @@ class GBS(GhostConv):
                  dw_kernel_size=3,
                  act=F.silu,
                  bn=F.batch_norm,
+                 intrinsic_ratio=None,
                  ) -> None:
         # groups_ratio 仅 SGhostConv 的通道混洗使用，GhostConv 不需要
         super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                          stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
-                         act=act, bn=bn)
+                         act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return super().forward(x)
@@ -114,6 +116,7 @@ class Bottleneck(nn.Module):
                 mid_dw_kernel_size: int | None = None,
                 use_dfc: bool = True,
                 res_type: str = "dw",
+                intrinsic_ratio: float | None = None,
                 ) -> None:
         super().__init__()
         if res_type not in ("dw", "identity"):
@@ -127,10 +130,11 @@ class Bottleneck(nn.Module):
         dw2 = dw_kernel_size if mid_dw_kernel_size is None else mid_dw_kernel_size
         self.SGhostConv1 = SGhostConv(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
-                                      dw_kernel_size=dw_kernel_size, act=act, bn=bn)
+                                      dw_kernel_size=dw_kernel_size, act=act, bn=bn,
+                                      intrinsic_ratio=intrinsic_ratio)
         self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=k2,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
-                                      dw_kernel_size=dw2, act=act, bn=bn)
+                                      dw_kernel_size=dw2, act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
         # use_dfc=False：去掉 DFC 门控（消融）；关闭时 x = x1，不创建 DFCAttention
         self.DFCAttention = DFCAttention(in_channels) if use_dfc else None
@@ -183,6 +187,7 @@ class SDGhost(nn.Module):
                  csp_style: str = "residual",
                  use_dfc: bool = True,
                  res_type: str = "dw",
+                 intrinsic_ratio: float | None = None,
                  ) -> None:
         super().__init__()
         if n < 1:
@@ -219,6 +224,7 @@ class SDGhost(nn.Module):
                     mid_dw_kernel_size=mid_dw_kernel_size,
                     use_dfc=use_dfc,
                     res_type=res_type,
+                    intrinsic_ratio=intrinsic_ratio,
                 )
                 for _ in range(n)
             ])
@@ -231,15 +237,20 @@ class SDGhost(nn.Module):
                 self.cv2 = Conv(in_channels, c_, 1, 1)
                 self.cv3 = Conv(2 * c_, out_channels, 1, 1)
             else:
-                self.cv1 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
-                self.cv2 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
-                self.cv3 = GBS(2 * c_, out_channels, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn)
+                self.cv1 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn,
+                               intrinsic_ratio=intrinsic_ratio)
+                self.cv2 = GBS(in_channels, c_, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn,
+                               intrinsic_ratio=intrinsic_ratio)
+                self.cv3 = GBS(2 * c_, out_channels, 1, 1, None, ratio, groups_ratio, dw_kernel_size, act, bn,
+                               intrinsic_ratio=intrinsic_ratio)
         elif ptype == "conv":
             self.GBS1 = Conv(in_channels, c_, 1, 1)
             self.GBS2 = Conv(c_, out_channels, 1, 1)
         else:
-            self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
-            self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn)
+            self.GBS1 = GBS(in_channels, c_, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn,
+                            intrinsic_ratio=intrinsic_ratio)
+            self.GBS2 = GBS(c_, out_channels, kernel_size, stride, padding, ratio, groups_ratio, dw_kernel_size, act, bn,
+                            intrinsic_ratio=intrinsic_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.csp_style == "yolo":
@@ -439,13 +450,15 @@ class Backbone(nn.Module):
         csp_style: str = "residual",
         use_dfc: bool = True,
         res_type: str = "dw",
+        intrinsic_ratio: float | None = None,
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
         dtype = str(downsample_type).lower()
         if dtype not in {"sghost", "conv"}:
             raise ValueError(f"downsample_type 须为 sghost/conv，当前 {downsample_type!r}")
-        ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
+        ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size,
+                        intrinsic_ratio=intrinsic_ratio)
         block_kw = dict(
             kernel_size=kernel_size,
             ratio=ratio,
@@ -459,6 +472,7 @@ class Backbone(nn.Module):
             csp_style=csp_style,
             use_dfc=use_dfc,
             res_type=res_type,
+            intrinsic_ratio=intrinsic_ratio,
         )
 
         def _down(cin: int, cout: int) -> nn.Module:
@@ -620,6 +634,7 @@ class SGC_YOLOv5(nn.Module):
         use_dfc: bool = True,
         res_type: str = "dw",
         cbam_mode: str = "full",
+        intrinsic_ratio: float | None = None,
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -643,6 +658,7 @@ class SGC_YOLOv5(nn.Module):
             csp_style=csp_style,
             use_dfc=use_dfc,
             res_type=res_type,
+            intrinsic_ratio=intrinsic_ratio,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
