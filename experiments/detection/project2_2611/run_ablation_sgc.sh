@@ -7,7 +7,7 @@
 #   nodfc_cbam_none_seed43 seed 43
 #   nodfc_cbam_none_seed44 seed 44
 #
-#   每个 run 训练结束后自动在 test 上评估（--analyze，口径同其它消融）。
+#   本脚本只训练；test 评估需要训练结束后单独运行 analyze.py。
 #
 # 用法（在仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
@@ -32,4 +32,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "全部 nodfc + nocbam 训练与测试完成。"
+echo "全部 nodfc + nocbam 训练完成。"
