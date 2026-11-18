@@ -27,7 +27,7 @@ for m in "${MODELS[@]}"; do
   echo "========================================"
   echo "[$(date '+%F %T')] start: $m"
   echo "========================================"
-  python experiments/detection/project2_2611/train.py -m "$m" --analyze
+  python experiments/detection/project2_2611/train.py -m "$m"
   echo "[$(date '+%F %T')] done:  $m"
   echo
 done
