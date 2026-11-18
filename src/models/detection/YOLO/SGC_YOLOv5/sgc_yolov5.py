@@ -7,7 +7,7 @@ from src.module.conv import DepthwiseConv, GhostConv, BaseConv
 from src.models.detection.YOLO.common import Bottleneck as YoloBottleneck
 from src.models.detection.YOLO.common import Conv, SPPF
 from src.models.detection.YOLO.yolov5 import DEFAULT_ANCHORS, VARIANTS, Detect, _Scaler  # _Scaler: 与标准 YOLOv5 相同的缩放规则
-from src.module.attention import CAM
+from src.module.attention.CAM.cam import CAM  # 直接导入类：src/module/attention/__init__.py 当前只导出 SelfAttention
 from src.module.attention.SAM.sam import SAM
 
 

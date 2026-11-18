@@ -42,6 +42,7 @@ pretrained_weights/**
 # ============================================================
 experiments/*/*/*/runs/
 experiments/*/*/*/runs_2/
+experiments/*/*/runs/
 experiments/*/*/*/outputs/
 # 分割实验的运行结果目录（按模型名分组，不入库）
 experiments/segment/project1_2610/SLR-UNet/
@@ -74,3 +75,37 @@ Swin-Unet/model_out/log.txt
 # ============================================================
 # github source
 *-main/
+
+# ============================================================
+# 服务器训练脚本的本地产物（队列日志、打包结果，不入库）
+# ============================================================
+experiments/detection/project2_2611/server/logs/
+experiments/detection/project2_2611/server/results/
+
+# ============================================================
+# 检测实验：分析脚本的输出目录（图表 / json，可由脚本重新生成，不入库；脚本本身入库）
+# ============================================================
+experiments/detection/project2_2611/redundancy_analysis/
+experiments/detection/project2_2611/redundancy_ir/
+experiments/detection/project2_2611/diagnose_p4_cbam/
+experiments/detection/project2_2611/size_ap/
+experiments/detection/project2_2611/profile_ghost/
+experiments/detection/project2_2611/profile_ops/
+experiments/detection/project2_2611/bench_latency/
+experiments/*/*/docs/
+experiments/*/*/*/output
+# ============================================================
+# 嵌套的独立 git 仓库（外部参考代码，各自带有 .git，不作为本仓库内容入库）
+# ============================================================
+/DINO/
+/DSTFP/
+/MISSFormer/
+/RT-DETR/
+/SiamTrackers/
+/Swin-UNETR/
+/Swin3D/
+/detr/
+/dinoV1/
+/sam3/
+/slim-neck-by-gsconv/
+/ultralytics/
