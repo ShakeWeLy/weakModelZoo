@@ -3,6 +3,7 @@
 #
 #   上一轮 015–017 基于残缺数据（train=14 / val=3）训练，结果无效，已删除。
 #
+#   seed42_rerun           基线 seed 42 重训（保留旧 2026-11-13_029_..._V1，新 run 名含 seed42_rerun）
 #   nodfc_cbam_none        seed 42
 #   nodfc_cbam_none_seed43 seed 43
 #   nodfc_cbam_none_seed44 seed 44
@@ -18,9 +19,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed44
+  sgc_yolov5s_c3_sgdown_gbot_dw5_seed42_rerun
+
 )
 
 for m in "${MODELS[@]}"; do

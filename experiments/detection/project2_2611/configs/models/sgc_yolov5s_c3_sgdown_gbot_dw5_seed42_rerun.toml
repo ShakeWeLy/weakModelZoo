@@ -1,0 +1,31 @@
+# 基线 seed 42 重训：与 sgc_yolov5s_c3_sgdown_gbot_dw5 完全相同（seed=42，40 epoch）。
+# 旧 run（2026-11-13_029_..._V1）保留不动，本次作为新的 run 单独记录。
+
+[experiments]
+name = "2026-11-18_018_SGC_c3_sgdown_gbot_dw5_s_seed42_rerun_V1"
+description = "c3_sgdown + ghost-bot dw5 | seed 42 rerun (baseline) | 40 epochs"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_sgdown_gbot_dw5"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+mid_dw_kernel_size = 5
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "sghost"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+
+[hyperparameters]
+num_epochs = 40
+
+[train]
+seed = 42
