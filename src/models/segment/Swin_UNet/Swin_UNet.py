@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from src.module.transformer.vit.swinTransformer import (
+from src.module.transformer.swinTransformer import (
     FinalPatchExpanding,
     PatchExpanding,
     PatchMerging,

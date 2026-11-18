@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[5]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

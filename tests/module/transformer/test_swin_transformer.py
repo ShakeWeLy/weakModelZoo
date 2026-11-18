@@ -1,11 +1,11 @@
 import pytest
 import torch
 
-from src.module.transformer.vit.swinTransformer import (
+from src.module.transformer.swinTransformer import (
     PatchMerging,
     ShiftedWindowAttention,
     SwinTransformerBlock,
-    WindowAttention,
+    WindowAttentionLayer,
     build_shifted_window_attn_mask,
     window_partition,
     window_reverse,
@@ -23,7 +23,7 @@ def test_window_partition_and_reverse():
 
 
 def test_window_attention_preserves_shape():
-    layer = WindowAttention(embed_dim=64, window_size=4, num_heads=4)
+    layer = WindowAttentionLayer(embed_dim=64, window_size=4, num_heads=4)
     x = torch.randn(2, 8, 8, 64)
 
     output = layer(x)
@@ -33,7 +33,7 @@ def test_window_attention_preserves_shape():
 
 
 def test_window_attention_rejects_invalid_size():
-    layer = WindowAttention(embed_dim=64, window_size=4, num_heads=4)
+    layer = WindowAttentionLayer(embed_dim=64, window_size=4, num_heads=4)
     x = torch.randn(1, 7, 8, 64)
 
     with pytest.raises(ValueError, match="整除"):

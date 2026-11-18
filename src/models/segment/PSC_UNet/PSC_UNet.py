@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 from src.module.conv import BaseConv
 from src.module.conv.SnakeConv.SnakeConv import SnakeConv
-from src.module.transformer.vit.swinTransformer import PatchMerging, SwinTransformerBlock
+from src.module.transformer.swinTransformer import PatchMerging, SwinTransformerBlock
 from src.module.wavelet import haar_dwt
 from src.models.segment.unet.unet import DoubleConv, OutConv
 

@@ -1,0 +1,48 @@
+# DSTFP：双模态 Swin Transformer 特征融合（fMRI Swin4D + FA Swin3D + fusion）
+# 上游实现参考 DSTFP/module/pl_classifier.py::LitMultimodalClassifier
+# 注意：DSTFP/module/models/ 当前缺失，本配置仅为实验占位。
+
+[experiments]
+# 新约定：name = 序号_标签_版本；日期写到 description 开头（不再放进 name）
+name = "001_DSTFP_V1"
+description = "2026-11-12 | DSTFP multimodal | fMRI Swin4D + FA Swin3D + AxialAttention fusion | placeholder"
+
+[model]
+arch = "dstfp"
+display_name = "DSTFP"       # 结果目录：runs/DSTFP/<name>/
+
+[model.params]
+# ---- fMRI backbone (swin4d_ver7) ----
+fmri_model = "swin4d_ver7"
+in_chans = 1
+embed_dim = 24
+window_size = [4, 4, 4, 4]
+first_window_size = [2, 2, 2, 2]
+patch_size = [5, 5, 5, 1]
+depths = [2, 2, 6, 2]
+num_heads = [3, 6, 12, 24]
+c_multiplier = 2
+attn_drop_rate = 0.0
+
+# ---- FA backbone (swin3d_transformer) ----
+fa_model = "swin3d_transformer"
+fa_embed_dim = 24
+fa_window_size = [4, 4, 4]
+fa_first_window_size = [2, 2, 2]
+fa_patch_size = [2, 2, 2]
+
+# ---- fusion / head ----
+fusion = "optimized_fusion"  # 对齐 fusion_H_W.optimized_fusion（占位）
+fusion_attn_dim = 48
+fusion_attn_depth = 2
+fusion_attn_heads = 8
+clf_head = "clf_mlp_mulit"
+num_classes = 3
+
+[dataset]
+dataset_name = "Multimodal"
+
+[quick.model.params]
+embed_dim = 12
+fa_embed_dim = 12
+depths = [1, 1, 1, 1]
