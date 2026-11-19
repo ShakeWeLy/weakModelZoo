@@ -34,11 +34,20 @@ MODELS=(
   sgc_yolov5s_c3_sgdown_gbot_dw5_resid_identity_seed44
 )
 
+run_train() {
+  # set -u 时，Linux 上空的 EXTRA_ARGS[@] 在部分 bash 会报 unbound variable
+  if ((${#EXTRA_ARGS[@]} > 0)); then
+    python experiments/detection/project2_2611/train.py -m "$1" "${EXTRA_ARGS[@]}"
+  else
+    python experiments/detection/project2_2611/train.py -m "$1"
+  fi
+}
+
 for m in "${MODELS[@]}"; do
   echo "========================================"
   echo "[$(date '+%F %T')] start: $m"
   echo "========================================"
-  python experiments/detection/project2_2611/train.py -m "$m" "${EXTRA_ARGS[@]}"
+  run_train "$m"
   echo "[$(date '+%F %T')] done:  $m"
   echo
 done
