@@ -6,7 +6,7 @@
 | c3_ghostbot_dw3                        | ghost-bot dw3 + Conv↓        | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           |    42    |     0.774     |     0.458     |    5.52    |   12.64   | 单 seed（数值来自报告）                          |
 | c3_ghostbot_dw5                        | ghost-bot dw5 + Conv↓        | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           |    42    |     0.777     |     0.463     |    5.52    |   12.68   | 单 seed                                          |
 | c3_ghostbot_dw7                        | ghost-bot dw7 + Conv↓        | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           |    42    |     0.796     |     0.468     |    5.53    |   12.74   | 单 seed                                          |
-| c3_sgdown_gbot_dw5                     | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           | 42/43/44 | 0.766 ± 0.020 | 0.455 ± 0.013 |    4.74    |   10.80   | 3 seed 完成                                      |
+| c3_sgdown_gbot_dw5                     | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           | 42/43/44 | 0.765 ± 0.018 | 0.456 ± 0.016 |    4.74    |   10.80   | 3 seed 完成（s42 用 `2026-11-18_018_…_rerun_V2` test） |
 | c3_sgdown_gbot_dw5（P3 去 SAM）        | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | P3 仅 CAM，P4/P5 CBAM + DFC + dw 残差 |    42    |     0.782     |     0.469     |    4.74    |     —     | 单 seed（`2026-11-17_006_…_cbamCamP3_V1`）       |
 | c3_sgdown_gbot_dw5（无 DFC）           | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ 无 DFC + dw 残差        |    42    |     0.792     |     0.477     |    4.73    |     —     | 单 seed（`2026-11-17_007_…_noDFC_V1`）           |
 | c3_sgdown_gbot_dw5（恒等残差）         | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ DFC + 恒等残差          |    42    |     0.754     |     0.449     |    4.73    |     —     | 单 seed（`2026-11-17_008_…_residIdentity_V1`）   |
@@ -16,12 +16,26 @@
 | c3_sgdown_gbot_dw5（本征占比 0.75）    | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           | 42/43/44 | 0.777 ± 0.007 | 0.468 ± 0.004 |    5.45    |     —     | 3 seed 完成（test，1501 张）                     |
 | c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo    | CBAM（full）+ DFC + dw 残差           |    42    |     0.783     |     0.479     |    4.75    |   10.86   | 单 seed（用 V2，V1 失败）                        |
 
+### 基线 3 seed：seed 42 重训（2026-11-18）
+
+- **动机**：首训 `2026-11-13_029_…_V1` 在 test 上偏高（mAP50 **0.789**，mAP50-95 **0.470**），拉高 3 seed 汇总标准差（原 **0.766 ± 0.020** / **0.455 ± 0.013**）。
+- **重训**：`sgc_yolov5s_c3_sgdown_gbot_dw5_seed42_rerun` → `2026-11-18_018_SGC_c3_sgdown_gbot_dw5_s_seed42_rerun_V2`（40 epoch，配置与基线一致）。
+- **test 单 seed**（`analyze.py --split test --checkpoint best`，1501 张）：
+
+| Seed | Run | mAP50 | mAP50-95 |
+|:--:|:--|--:|--:|
+| 42（rerun） | `…_018_…_rerun_V2` | 0.785 | 0.474 |
+| 43 | `…_001_…_seed43_V1` | 0.750 | 0.446 |
+| 44 | `…_002_…_seed44_V1` | 0.759 | 0.448 |
+
+- **汇总**（样本标准差 ddof=1）：mAP50 **0.765 ± 0.018**，mAP50-95 **0.456 ± 0.016**。相对重训前，mAP50 标准差由 0.020 略降至 0.018，但仍远高于 YOLOv5s 同批 3 seed（**0.003**）；mAP50-95 标准差由 0.013 升至 0.016。说明 seed 42 偏高并非唯一因素，本模型在 test 上对初始化仍较敏感。
+
 ### 无 DFC + 无 CBAM：test 评估记录（2026-11-17）
 
 - **口径**：`analyze.py --split test --checkpoint best --no-vis`，与 `configs/global.toml` 的 `[test]`（conf=0.001、IoU=0.6、max_det=300）及同日其它消融一致。
 - **已执行（seed 42）**：`sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbamnone` → run `_015_…_seed42` → **mAP50=0.0000，mAP50-95=0.0000**（`predictions/test/metrics.json`）。seed 43/44 未再跑（同批误训，结果必然为 0）。
 - **根因**：`train.log` 记载 `train=14 / val=3`；本仓 `data/Det_Fly` 当前仅 1518 张图（test 1501 + 少量 train/val）。同日上午的 3-seed 本模型（`train=7000`）说明当时曾有完整集，晚间队列在残缺数据上误训约 3 min/40 epoch。
-- **对照基线（完整 c3_sgdown_gbot_dw5，3 seed）**：mAP50 **0.766 ± 0.020**，mAP50-95 **0.455 ± 0.013**（`size_ap/multi_2026-11-17.json`：`ours_s42/s43/s44`）。
+- **对照基线（完整 c3_sgdown_gbot_dw5，3 seed）**：mAP50 **0.765 ± 0.018**，mAP50-95 **0.456 ± 0.016**（test：`…_rerun_V2` + seed43/44 的 `predictions/test/metrics.json`；旧 s42 见上节）。
 - **重训 + 重评**（仓库根目录，恢复 `train 7000 / val 1500 / test 1501` 后）：
 
 ```bash
@@ -45,7 +59,7 @@ done
 
 | 本征占比 r | 参数量 (M) | test mAP50 | dup%：s2 / s3 / s4 / s5 | NN\|r\|：s2 / s3 / s4 / s5 | mean\|r\|：s2 / s3 / s4 / s5 |
 |:--|--:|:--|:--|:--|:--|
-| 0.5（基线） | 4.74 | 0.766 ± 0.020 | 0.71 / 0.66 / 0.80 / 0.82 | 0.91 / 0.91 / 0.93 / 0.94 | 0.45 / 0.31 / 0.37 / 0.35 |
+| 0.5（基线） | 4.74 | 0.765 ± 0.018 | 0.71 / 0.66 / 0.80 / 0.82 | 0.91 / 0.91 / 0.93 / 0.94 | 0.45 / 0.31 / 0.37 / 0.35 |
 | 0.625 | 5.12 | 0.773 ± 0.004 | 0.42 / 0.32 / 0.43 / 0.39 | 0.82 / 0.80 / 0.85 / 0.85 | 0.38 / 0.32 / 0.36 / 0.38 |
 | 0.75 | 5.45 | 0.777 ± 0.007 | 0.41 / 0.30 / 0.42 / 0.37 | 0.82 / 0.81 / 0.85 / 0.84 | 0.37 / 0.32 / 0.36 / 0.36 |
 
@@ -67,7 +81,7 @@ done
 2. **冗余没有消失，而是从“单通道复制”变成“组合可预测”。** 分组卷积后的幽灵仍有 R2_group 0.79–0.92，基线单父为 0.77–0.85，r=0.625 时最高。幽灵基本是父组的线性组合。
 3. **平均两两 \|r\| 在三组之间几乎不变**（0.31–0.45），再次说明只看平均值会低估结构性冗余。
 4. **0.625 与 0.75 结果接近。** 0.75 的父组更小（3→1），幽灵之间的近似重复（dup_gg）最低（0.08–0.23）。
-5. **精度没有显著收益，参数增加。** test mAP50 为 0.766 ± 0.020 → 0.773 ± 0.004 → 0.777 ± 0.007，差异小于基线 seed 间标准差（0.020）。参数量分别增加 8%（0.625）和 15%（0.75），来自本征主卷积和分组幽灵卷积的增长。
+5. **精度没有显著收益，参数增加。** test mAP50 为 0.765 ± 0.018 → 0.773 ± 0.004 → 0.777 ± 0.007，差异小于基线 seed 间标准差（0.018）。参数量分别增加 8%（0.625）和 15%（0.75），来自本征主卷积和分组幽灵卷积的增长。
 6. **混杂因素。** 本征通道数随 r 增加（stage3：64 → 80 → 96），copy 与 NN 对候选数量敏感。参数量同时变化，卷积结构也变了，不是只改冗余的纯对照。只用 20 张图，每组 3 个 seed。
 
 **与轻量化的关系**：提高本征占比能降低“复制型”冗余，但没有带来显著精度收益，还增加了 8–15% 参数，对轻量化不利。复制型冗余在基线上并不是精度瓶颈。若目标是轻量化，应从减少算子数和计算量入手（见 2026-11-17 的延迟分析）。
