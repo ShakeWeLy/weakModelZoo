@@ -27,3 +27,6 @@ csp_style = "yolo"
 
 [hyperparameters]
 num_epochs = 40
+
+[train]
+seed = 42

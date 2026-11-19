@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
-# 训练队列：c3_sgdown_gbot_dw5 三项结构消融补齐 seed 43/44（seed 42 已有单 run）。
+# 训练队列：dw3 三 seed（42/43/44）；dw7 仅 seed 43/44（42 已有 `…_030_…_V2`）。
 #
-#   无 DFC          → nodfc_seed43 / nodfc_seed44
-#   无 CBAM         → cbam_none_seed43 / cbam_none_seed44
-#   恒等残差        → resid_identity_seed43 / resid_identity_seed44
+#   本脚本只训练；test 用 analyze.py。
 #
-#   本脚本只训练；test 评估训练结束后单独运行 analyze.py。
-#
-# 用法（在仓库根目录）：
+# 用法（仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
-#
-# 服务器必须先 git pull（含 CAM 导入修复，否则 CBAM 构建报 module is not callable）。
 
 set -euo pipefail
 
@@ -20,22 +14,19 @@ cd "$ROOT"
 EXTRA_ARGS=()
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    # Windows：global.toml 默认 num_workers=24 会 spawn 多进程并反复加载 torch，易 WinError 1455
     EXTRA_ARGS+=(--set "dataset.num_workers=0")
     ;;
 esac
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_seed44
-  sgc_yolov5s_c3_sgdown_gbot_dw5_cbam_none_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_cbam_none_seed44
-  sgc_yolov5s_c3_sgdown_gbot_dw5_resid_identity_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw5_resid_identity_seed44
+  sgc_yolov5s_c3_sgdown_gbot_dw3
+  sgc_yolov5s_c3_sgdown_gbot_dw3_seed43
+  sgc_yolov5s_c3_sgdown_gbot_dw3_seed44
+  sgc_yolov5s_c3_sgdown_gbot_dw7_seed43
+  sgc_yolov5s_c3_sgdown_gbot_dw7_seed44
 )
 
 run_train() {
-  # set -u 时，Linux 上空的 EXTRA_ARGS[@] 在部分 bash 会报 unbound variable
   if ((${#EXTRA_ARGS[@]} > 0)); then
     python experiments/detection/project2_2611/train.py -m "$1" "${EXTRA_ARGS[@]}"
   else
@@ -52,4 +43,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "结构消融 3×2 seed（43/44）训练队列完成。"
+echo "c3_sgdown_gbot_dw3/dw7 训练队列完成。"
