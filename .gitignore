@@ -92,7 +92,8 @@ experiments/detection/project2_2611/size_ap/
 experiments/detection/project2_2611/profile_ghost/
 experiments/detection/project2_2611/profile_ops/
 experiments/detection/project2_2611/bench_latency/
-experiments/*/*/docs/
+experiments/detection/project2_2611/analysis_scripts/
+# experiments/*/*/docs/
 experiments/*/*/*/output
 # ============================================================
 # 嵌套的独立 git 仓库（外部参考代码，各自带有 .git，不作为本仓库内容入库）
