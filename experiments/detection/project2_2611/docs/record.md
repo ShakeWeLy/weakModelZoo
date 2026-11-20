@@ -17,6 +17,20 @@
 | c3_sgdown_gbot_dw5（本征占比 0.75）    | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.777 ± 0.007   |   0.468 ± 0.004   |    5.45    |   12.69   | 3 seed 完成（test，1501 张）                                 |
 | c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.759 ± 0.043   |   0.453 ± 0.036   |    4.75    |   10.85   | 3 seed（s42=`…_030_…_V2`；s43 偏低见下节）                   |
 
+### 待训（2026-11-20）：seed 45 + GhostNetV2 DFC
+
+- **动机**：dw5 / 无 DFC+无 CBAM / dw7 的 seed 方差偏大；dw7 s43 坏收敛。补 **seed 45**；并增加 **仅改 DFC** 的基线对照。
+- **DFC 实现**：历史 `dfc_type=strip`（默认）为 1×5 / 5×1 条带 depthwise **无池化**；`dfc_type=ghostv2` 对齐 GhostNetV2（`avg_pool2` → short_conv → sigmoid → nearest 上采样门控）。旧 checkpoint **不兼容** `ghostv2`。
+- **队列**（`run_ablation_sgc.sh`）：`seed45`×3 + `sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2`（s42）。
+- **汇总建议**：dw7 报告时用 **42/44/45** 或剔除 s43；无 DFC+无 CBAM 可报 **42/43/44/45** 四 seed 或 **42/43/45** 去掉 s44 离群。
+
+| 配置 | `-m` | seed |
+|:--|:--|:--:|
+| dw5 基线 | `sgc_yolov5s_c3_sgdown_gbot_dw5_seed45` | 45 |
+| dw7 | `sgc_yolov5s_c3_sgdown_gbot_dw7_seed45` | 45 |
+| 无 DFC+无 CBAM | `sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed45` | 45 |
+| dw5 + DFC GhostV2 | `sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2` | 42 |
+
 ### 服务器批次（2026-11-19）：dw3/dw7 与结构消融 43/44
 
 - **来源**：`project2_2611/new/` 已迁入各 `SGC_YOLOv5_*/runs/`，并执行 `analyze.py --split test --checkpoint best --no-vis`（1501 张）。

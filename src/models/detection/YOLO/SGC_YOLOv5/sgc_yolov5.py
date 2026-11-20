@@ -75,22 +75,55 @@ class GBS(GhostConv):
 
 
 class DFCAttention(nn.Module):
-    '''
-    DFC注意力模块利用~固定权重~(可学习的)全连接层来创建具有全局感受野的注意力图，
-    以捕获长距离空间位置的依赖关系从而增强S-Ghost 模块
-    '''
+    """历史实现：1×K / K×1 条带 depthwise，**无**池化下采样（非 GhostNetV2 论文默认 DFC）。"""
+
     def __init__(self, channels, kernel_size=5):
         super().__init__()
-        # 用深度卷积模拟水平/垂直方向的全连接层
         self.h_conv = nn.Conv2d(channels, channels, (1, kernel_size),
-                                padding=(0, kernel_size//2), groups=channels)
+                                padding=(0, kernel_size // 2), groups=channels)
         self.v_conv = nn.Conv2d(channels, channels, (kernel_size, 1),
-                                padding=(kernel_size//2, 0), groups=channels)
+                                padding=(kernel_size // 2, 0), groups=channels)
         self.sigmoid = nn.Sigmoid()
-    def forward(self, x):
-        h_feat = self.h_conv(x)
-        v_feat = self.v_conv(x)
-        return self.sigmoid(h_feat * v_feat)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.sigmoid(self.h_conv(x) * self.v_conv(x))
+
+
+class DFCAttentionGhostV2(nn.Module):
+    """GhostNetV2 DFC：avg_pool2 → short_conv(3×3 → 1×5 → 5×1 DW+BN) → sigmoid → 上采样至门控尺寸。"""
+
+    def __init__(self, channels: int, conv_k: int = 1, dfc_k: int = 5):
+        super().__init__()
+        p = conv_k // 2
+        p5 = dfc_k // 2
+        self.short_conv = nn.Sequential(
+            nn.Conv2d(channels, channels, conv_k, 1, p, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, (1, dfc_k), 1, (0, p5), groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, (dfc_k, 1), 1, (p5, 0), groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h, w = x.shape[-2:]
+        xs = x if h < 2 or w < 2 else F.avg_pool2d(x, kernel_size=2, stride=2)
+        gate = self.sigmoid(self.short_conv(xs))
+        if gate.shape[-2:] != (h, w):
+            gate = F.interpolate(gate, size=(h, w), mode="nearest")
+        return gate
+
+
+def _build_dfc_attention(channels: int, use_dfc: bool, dfc_type: str) -> nn.Module | None:
+    if not use_dfc:
+        return None
+    kind = str(dfc_type).lower()
+    if kind in {"strip", "legacy"}:
+        return DFCAttention(channels)
+    if kind in {"ghostv2", "v2", "pool"}:
+        return DFCAttentionGhostV2(channels)
+    raise ValueError(f"dfc_type 须为 strip/ghostv2，当前 {dfc_type!r}")
 
 
 
@@ -115,6 +148,7 @@ class Bottleneck(nn.Module):
                 mid_kernel_size: int | None = None,
                 mid_dw_kernel_size: int | None = None,
                 use_dfc: bool = True,
+                dfc_type: str = "strip",
                 res_type: str = "dw",
                 intrinsic_ratio: float | None = None,
                 ) -> None:
@@ -136,8 +170,7 @@ class Bottleneck(nn.Module):
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw2, act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
-        # use_dfc=False：去掉 DFC 门控（消融）；关闭时 x = x1，不创建 DFCAttention
-        self.DFCAttention = DFCAttention(in_channels) if use_dfc else None
+        self.DFCAttention = _build_dfc_attention(in_channels, use_dfc, dfc_type)
         # res_type="dw"（默认）：残差支路为 3×3 深度卷积；"identity"：恒等捷径（消融）
         self.DWConv2 = (BaseConv(out_channels, out_channels, 3, stride, groups=out_channels, act=act, bn=bn)
                         if res_type == "dw" else None)
@@ -186,6 +219,7 @@ class SDGhost(nn.Module):
                  proj_type: str = "ghost",
                  csp_style: str = "residual",
                  use_dfc: bool = True,
+                 dfc_type: str = "strip",
                  res_type: str = "dw",
                  intrinsic_ratio: float | None = None,
                  ) -> None:
@@ -223,6 +257,7 @@ class SDGhost(nn.Module):
                     mid_kernel_size=mid_kernel_size,
                     mid_dw_kernel_size=mid_dw_kernel_size,
                     use_dfc=use_dfc,
+                    dfc_type=dfc_type,
                     res_type=res_type,
                     intrinsic_ratio=intrinsic_ratio,
                 )
@@ -449,6 +484,7 @@ class Backbone(nn.Module):
         downsample_type: str = "sghost",
         csp_style: str = "residual",
         use_dfc: bool = True,
+        dfc_type: str = "strip",
         res_type: str = "dw",
         intrinsic_ratio: float | None = None,
     ) -> None:
@@ -471,6 +507,7 @@ class Backbone(nn.Module):
             proj_type=proj_type,
             csp_style=csp_style,
             use_dfc=use_dfc,
+            dfc_type=dfc_type,
             res_type=res_type,
             intrinsic_ratio=intrinsic_ratio,
         )
@@ -632,6 +669,7 @@ class SGC_YOLOv5(nn.Module):
         downsample_type: str = "sghost",
         csp_style: str = "residual",
         use_dfc: bool = True,
+        dfc_type: str = "strip",
         res_type: str = "dw",
         cbam_mode: str = "full",
         intrinsic_ratio: float | None = None,
@@ -657,6 +695,7 @@ class SGC_YOLOv5(nn.Module):
             downsample_type=downsample_type,
             csp_style=csp_style,
             use_dfc=use_dfc,
+            dfc_type=dfc_type,
             res_type=res_type,
             intrinsic_ratio=intrinsic_ratio,
         )

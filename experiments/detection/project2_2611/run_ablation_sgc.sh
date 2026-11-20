@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# 训练队列：c3_sgdown / c3topo_1 去 CBAM（cbam_mode=none），各 3 seed（42/43/44）。
-# 原带 CBAM 单 seed 仍为 `…_024_…` / `…_021_…`，与本队列 run 分开。
-#
-#   本脚本只训练；test 用 analyze.py。
+# 训练队列（2026-11-20）：
+#   seed 45：dw5 基线 / dw7 / 无 DFC+无 CBAM（压方差、替换异常 seed）
+#   基线 + GhostNetV2 DFC（dfc_type=ghostv2，仅改门控）
 #
 # 用法（仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
@@ -20,12 +19,10 @@ case "$(uname -s)" in
 esac
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_cbam_none
-  sgc_yolov5s_c3_sgdown_cbam_none_seed43
-  sgc_yolov5s_c3_sgdown_cbam_none_seed44
-  sgc_yolov5s_c3topo_1_cbam_none
-  sgc_yolov5s_c3topo_1_cbam_none_seed43
-  sgc_yolov5s_c3topo_1_cbam_none_seed44
+  sgc_yolov5s_c3_sgdown_gbot_dw5_seed45
+  sgc_yolov5s_c3_sgdown_gbot_dw7_seed45
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed45
+  sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2
 )
 
 run_train() {
@@ -45,4 +42,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "训练队列完成。"
+echo "seed45 + DFC GhostV2 训练队列完成。"
