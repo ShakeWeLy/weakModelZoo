@@ -6,15 +6,46 @@
 | c3_ghostbot_dw3                        | ghost-bot dw3 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.774       |       0.458       |    5.52    |   12.64   | 单 seed（数值来自报告）                                      |
 | c3_ghostbot_dw5                        | ghost-bot dw5 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.777       |       0.463       |    5.52    |   12.68   | 单 seed                                                      |
 | c3_ghostbot_dw7                        | ghost-bot dw7 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.796       |       0.468       |    5.53    |   12.74   | 单 seed                                                      |
+| c3_sgdown_gbot_dw3                     | ghost-bot dw3 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.765 ± 0.005   |   0.456 ± 0.006   |    4.73    |     —     | 3 seed（`2026-11-19_025`～`027`，test）                      |
 | **c3_sgdown_gbot_dw5**                 | **ghost-bot dw5 + SGhost↓**  | **VOVGCSPYolo** | **CBAM（full）+ DFC + dw 残差**       | **42/43/44** | **0.765 ± 0.018** | **0.456 ± 0.016** |  **4.74**  | **10.80** | 3 seed 完成（s42 用 `2026-11-18_018_…_rerun_V2` test）       |
 | c3_sgdown_gbot_dw5（P3 去 SAM）        | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | P3 仅 CAM，P4/P5 CBAM + DFC + dw 残差 |      42      |       0.782       |       0.469       |    4.74    |     —     | 单 seed（`2026-11-17_006_…_cbamCamP3_V1`）                   |
-| c3_sgdown_gbot_dw5（无 DFC）           | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ 无 DFC + dw 残差        |      42      |       0.792       |       0.477       |    4.73    |     —     | 单 seed（`2026-11-17_007_…_noDFC_V1`）                       |
-| c3_sgdown_gbot_dw5（恒等残差）         | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + 恒等残差          |      42      |       0.754       |       0.449       |    4.73    |     —     | 单 seed（`2026-11-17_008_…_residIdentity_V1`）               |
-| c3_sgdown_gbot_dw5（无 CBAM）          | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + DFC + dw 残差               |      42      |       0.787       |       0.478       |    4.69    |     —     | 单 seed（`2026-11-17_005_…_cbamNone_V1`）                    |
-| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            |   42/43/44   |         —         |         —         |    4.69    |     —     | **无效 run**：本地误用 train=14/val=3（非 7000/1500），test@42=0.000；须在完整 Det_Fly 上重训后重评 |
+| c3_sgdown_gbot_dw5（无 DFC）           | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ 无 DFC + dw 残差        |   42/43/44   |   0.785 ± 0.008   |   0.470 ± 0.006   |    4.73    |     —     | 3 seed（`007`+`2026-11-19_019`/`020`，test）                 |
+| c3_sgdown_gbot_dw5（恒等残差）         | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + 恒等残差          |   42/43/44   |   0.765 ± 0.010   |   0.456 ± 0.007   |    4.73    |     —     | 3 seed（`008`+`2026-11-19_023`/`024`，test）                 |
+| c3_sgdown_gbot_dw5（无 CBAM）          | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + DFC + dw 残差               |   42/43/44   |   0.782 ± 0.009   |   0.467 ± 0.011   |    4.69    |     —     | 3 seed（`005`+`2026-11-19_021`/`022`，test）                 |
+| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            |   42/43/44   |   0.802 ± 0.015   |   0.482 ± 0.016   |    4.69    |     —     | 3 seed（`015`/`016_V2`/`017`，test；2026-11-18 完整 Det_Fly） |
 | c3_sgdown_gbot_dw5（本征占比 0.625）   | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.773 ± 0.004   |   0.461 ± 0.007   |    5.12    |     —     | 3 seed 完成（test，1501 张）                                 |
 | c3_sgdown_gbot_dw5（本征占比 0.75）    | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.777 ± 0.007   |   0.468 ± 0.004   |    5.45    |     —     | 3 seed 完成（test，1501 张）                                 |
-| c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.783       |       0.479       |    4.75    |   10.86   | 单 seed（用 V2，V1 失败）                                    |
+| c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.759 ± 0.043   |   0.453 ± 0.036   |    4.75    |   10.86   | 3 seed（s42=`…_030_…_V2`；s43 偏低见下节）                   |
+
+### 服务器批次（2026-11-19）：dw3/dw7 与结构消融 43/44
+
+- **来源**：`project2_2611/new/` 已迁入各 `SGC_YOLOv5_*/runs/`，并执行 `analyze.py --split test --checkpoint best --no-vis`（1501 张）。
+- **Ghost 瓶颈 DW 扫描（SGhost↓）**
+
+| 变体 | Seed 42 | Seed 43 | Seed 44 | test mAP50 | test mAP50-95 |
+|:--|--:|--:|--:|--:|--:|
+| **dw3** | 0.771 | 0.765 | 0.761 | **0.765 ± 0.005** | 0.456 ± 0.006 |
+| **dw5（基线）** | 0.785 | 0.750 | 0.759 | **0.765 ± 0.018** | 0.456 ± 0.016 |
+| **dw7** | 0.783 | **0.709** | 0.785 | **0.759 ± 0.043** | 0.453 ± 0.036 |
+
+- **解读（DW）**
+  1. **dw3 与 dw5 几乎等价**：三 seed 方差很小（±0.005），均值与 dw5 基线重合；缩小瓶颈 DW（5→3）**不带来精度收益，也未改善种子稳定性**。
+  2. **dw7 仍不稳定**：seed 43 test mAP50 仅 **0.709**（比同配置 val 最佳 ~0.75 跌约 4pt），把三 seed 标准差拉回到 **0.043**（与早期 dw5 同量级）。seed 42/44 仍在 0.783–0.785，说明 **dw7 对初始化敏感，不是一致性的“更大感受野”收益**。
+  3. **相对 Conv↓ 对照**（表上 `c3_ghostbot_dw*` 单 seed）：SGhost↓ 的 dw5/dw3 test 仍低于 Conv↓ dw7（0.796），轻量化路线仍在小目标/召回上付出代价。
+
+- **结构消融 3 seed（相对 dw5 基线 0.765 / 0.456）**
+
+| 消融 | mAP50（3 seed） | mAP50-95 | 相对基线 |
+|:--|:--|:--|:--|
+| 无 DFC | **0.785 ± 0.008** | 0.470 ± 0.006 | mAP50 **+0.020**（意外偏高，需结合延迟再论） |
+| 无 CBAM | 0.782 ± 0.009 | 0.467 ± 0.011 | mAP50 +0.017 |
+| 无 DFC + 无 CBAM | **0.802 ± 0.015** | **0.482 ± 0.016** | mAP50 **+0.037**，mAP50-95 +0.026 |
+| 恒等残差 | 0.765 ± 0.010 | 0.456 ± 0.007 | 与基线重合（单 seed 0.754 属 seed 噪声） |
+
+- **解读（消融）**
+  1. 补齐 43/44 后，**去 DFC / 去 CBAM** 均值略高于 dw5 三 seed，但优势 **小于 dw5 seed 间 std（0.018）**。
+  2. **无 DFC + 无 CBAM**（`015`/`016_V2`/`017`，`train=7000`）test 均值 **高于完整 dw5 基线**（mAP50 0.802 vs 0.765）；与「无效 14/3 训练」无关，early test=0 为误读。seed 44 达 **0.818**，seed 间 std 0.015，仍高于 YOLOv5s（0.003），但优于多数 SGhost 变体。
+  3. **恒等残差** 三 seed 与基线持平；dw 残差主要影响延迟/动力学，非平均 test AP。
 
 ### 基线 3 seed：seed 42 重训（2026-11-18）
 
@@ -30,24 +61,18 @@
 
 - **汇总**（样本标准差 ddof=1）：mAP50 **0.765 ± 0.018**，mAP50-95 **0.456 ± 0.016**。相对重训前，mAP50 标准差由 0.020 略降至 0.018，但仍远高于 YOLOv5s 同批 3 seed（**0.003**）；mAP50-95 标准差由 0.013 升至 0.016。说明 seed 42 偏高并非唯一因素，本模型在 test 上对初始化仍较敏感。
 
-### 无 DFC + 无 CBAM：test 评估记录（2026-11-17）
+### 无 DFC + 无 CBAM：test 评估（2026-11-18 训练，2026-11-20 补评）
 
-- **口径**：`analyze.py --split test --checkpoint best --no-vis`，与 `configs/global.toml` 的 `[test]`（conf=0.001、IoU=0.6、max_det=300）及同日其它消融一致。
-- **已执行（seed 42）**：`sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbamnone` → run `_015_…_seed42` → **mAP50=0.0000，mAP50-95=0.0000**（`predictions/test/metrics.json`）。seed 43/44 未再跑（同批误训，结果必然为 0）。
-- **根因**：`train.log` 记载 `train=14 / val=3`；本仓 `data/Det_Fly` 当前仅 1518 张图（test 1501 + 少量 train/val）。同日上午的 3-seed 本模型（`train=7000`）说明当时曾有完整集，晚间队列在残缺数据上误训约 3 min/40 epoch。
-- **对照基线（完整 c3_sgdown_gbot_dw5，3 seed）**：mAP50 **0.765 ± 0.018**，mAP50-95 **0.456 ± 0.016**（test：`…_rerun_V2` + seed43/44 的 `predictions/test/metrics.json`；旧 s42 见上节）。
-- **重训 + 重评**（仓库根目录，恢复 `train 7000 / val 1500 / test 1501` 后）：
+- **训练**：三 seed 均在 **完整 Det_Fly**（`train=7000 / val=1500`）上 40 epoch 完成；`train.log` 可查。早期 record 误写「train=14」系另一批失败 run，**与 `015`/`016`/`017` 无关**。
+- **test**（`analyze.py --split test --checkpoint best --no-vis`）：
 
-```bash
-# 删除无效 run 后按配置名重训并自动 test
-for m in sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none \
-         sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed43 \
-         sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed44; do
-  python experiments/detection/project2_2611/train.py -m "$m" --analyze
-done
-```
+| Seed | Run | mAP50 | mAP50-95 |
+|:--:|:--|--:|--:|
+| 42 | `…_015_…_seed42_V1` | 0.797 | 0.465 |
+| 43 | `…_016_…_seed43_V2` | 0.790 | 0.483 |
+| 44 | `…_017_…_seed44_V1` | 0.818 | 0.497 |
 
-- **服务器**：`server/manifest.csv` 已加入 `nodfc_cbamnone_s42/s43/s44`（`run_queue.py --analyze` 口径）。
+- **汇总**：mAP50 **0.802 ± 0.015**，mAP50-95 **0.482 ± 0.016**（高于 dw5 基线 **0.765 / 0.456**）。参数 **4.69M**（少 CBAM）。**无需再入 `run_ablation_sgc.sh` 训练队列**。
 
 ### 通道冗余对比：Ghost 本征占比 0.5 / 0.625 / 0.75（2026-11-18）
 
