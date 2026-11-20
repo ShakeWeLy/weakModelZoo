@@ -6,16 +6,16 @@
 | c3_ghostbot_dw3                        | ghost-bot dw3 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.774       |       0.458       |    5.52    |   12.64   | 单 seed（数值来自报告）                                      |
 | c3_ghostbot_dw5                        | ghost-bot dw5 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.777       |       0.463       |    5.52    |   12.68   | 单 seed                                                      |
 | c3_ghostbot_dw7                        | ghost-bot dw7 + Conv↓        | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |      42      |       0.796       |       0.468       |    5.53    |   12.74   | 单 seed                                                      |
-| c3_sgdown_gbot_dw3                     | ghost-bot dw3 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.765 ± 0.005   |   0.456 ± 0.006   |    4.73    |     —     | 3 seed（`2026-11-19_025`～`027`，test）                      |
+| c3_sgdown_gbot_dw3                     | ghost-bot dw3 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.765 ± 0.005   |   0.456 ± 0.006   |    4.73    |   10.76   | 3 seed（`2026-11-19_025`～`027`，test）                      |
 | **c3_sgdown_gbot_dw5**                 | **ghost-bot dw5 + SGhost↓**  | **VOVGCSPYolo** | **CBAM（full）+ DFC + dw 残差**       | **42/43/44** | **0.765 ± 0.018** | **0.456 ± 0.016** |  **4.74**  | **10.80** | 3 seed 完成（s42 用 `2026-11-18_018_…_rerun_V2` test）       |
-| c3_sgdown_gbot_dw5（P3 去 SAM）        | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | P3 仅 CAM，P4/P5 CBAM + DFC + dw 残差 |      42      |       0.782       |       0.469       |    4.74    |     —     | 单 seed（`2026-11-17_006_…_cbamCamP3_V1`）                   |
-| c3_sgdown_gbot_dw5（无 DFC）           | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ 无 DFC + dw 残差        |   42/43/44   |   0.785 ± 0.008   |   0.470 ± 0.006   |    4.73    |     —     | 3 seed（`007`+`2026-11-19_019`/`020`，test）                 |
-| c3_sgdown_gbot_dw5（恒等残差）         | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + 恒等残差          |   42/43/44   |   0.765 ± 0.010   |   0.456 ± 0.007   |    4.73    |     —     | 3 seed（`008`+`2026-11-19_023`/`024`，test）                 |
-| c3_sgdown_gbot_dw5（无 CBAM）          | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + DFC + dw 残差               |   42/43/44   |   0.782 ± 0.009   |   0.467 ± 0.011   |    4.69    |     —     | 3 seed（`005`+`2026-11-19_021`/`022`，test）                 |
-| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            |   42/43/44   |   0.802 ± 0.015   |   0.482 ± 0.016   |    4.69    |     —     | 3 seed（`015`/`016_V2`/`017`，test；2026-11-18 完整 Det_Fly） |
-| c3_sgdown_gbot_dw5（本征占比 0.625）   | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.773 ± 0.004   |   0.461 ± 0.007   |    5.12    |     —     | 3 seed 完成（test，1501 张）                                 |
-| c3_sgdown_gbot_dw5（本征占比 0.75）    | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.777 ± 0.007   |   0.468 ± 0.004   |    5.45    |     —     | 3 seed 完成（test，1501 张）                                 |
-| c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.759 ± 0.043   |   0.453 ± 0.036   |    4.75    |   10.86   | 3 seed（s42=`…_030_…_V2`；s43 偏低见下节）                   |
+| c3_sgdown_gbot_dw5（P3 去 SAM）        | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | P3 仅 CAM，P4/P5 CBAM + DFC + dw 残差 |      42      |       0.782       |       0.469       |    4.74    |   10.80   | 单 seed（`2026-11-17_006_…_cbamCamP3_V1`）                   |
+| c3_sgdown_gbot_dw5（无 DFC）           | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ 无 DFC + dw 残差        |   42/43/44   |   0.785 ± 0.008   |   0.470 ± 0.006   |    4.73    |   10.75   | 3 seed（`007`+`2026-11-19_019`/`020`，test）                 |
+| c3_sgdown_gbot_dw5（恒等残差）         | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + 恒等残差          |   42/43/44   |   0.765 ± 0.010   |   0.456 ± 0.007   |    4.73    |   10.74   | 3 seed（`008`+`2026-11-19_023`/`024`，test）                 |
+| c3_sgdown_gbot_dw5（无 CBAM）          | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + DFC + dw 残差               |   42/43/44   |   0.782 ± 0.009   |   0.467 ± 0.011   |    4.69    |   10.79   | 3 seed（`005`+`2026-11-19_021`/`022`，test）                 |
+| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            |   42/43/44   |   0.802 ± 0.015   |   0.482 ± 0.016   |    4.69    |   10.75   | 3 seed（`015`/`016_V2`/`017`，test；2026-11-18 完整 Det_Fly） |
+| c3_sgdown_gbot_dw5（本征占比 0.625）   | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.773 ± 0.004   |   0.461 ± 0.007   |    5.12    |   11.90   | 3 seed 完成（test，1501 张）                                 |
+| c3_sgdown_gbot_dw5（本征占比 0.75）    | ghost-bot dw5 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.777 ± 0.007   |   0.468 ± 0.004   |    5.45    |   12.69   | 3 seed 完成（test，1501 张）                                 |
+| c3_sgdown_gbot_dw7                     | ghost-bot dw7 + SGhost↓      | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           |   42/43/44   |   0.759 ± 0.043   |   0.453 ± 0.036   |    4.75    |   10.85   | 3 seed（s42=`…_030_…_V2`；s43 偏低见下节）                   |
 
 ### 服务器批次（2026-11-19）：dw3/dw7 与结构消融 43/44
 
@@ -114,4 +114,6 @@
 **代码改动（需注意）**：为运行本分析，修复了 `src/models/detection/YOLO/SGC_YOLOv5/sgc_yolov5.py` 的导入：`CAM` 改为 `from src.module.attention.CAM.cam import CAM`。原因是提交 `821137d`（DSTFP）把 `src/module/attention/__init__.py` 改为只导出 `SelfAttention`，SGC 模型构建时报 `'module' object is not callable`。这同样影响服务器上的训练队列。`__init__.py` 未改动，本次修复尚未提交，需要确认后再入库。
 
 **复现**：`python experiments/detection/project2_2611/redundancy_ir_analysis.py --num 20`（仓库根目录，CPU 约 100 s）。
+
+**FLOPs (G) 口径**（2026-11-20 补全表中 `—`）：`thop.profile`，输入 1×3×640，`FLOPs (G) = 2 × GMACs`（与 `docs/SGC_YOLOv5_实验报告.md` §2.3 一致）。dw3/dw5/dw7 随瓶颈 `mid_dw_kernel_size` 略变（10.76 / 10.80 / 10.85）；无 CBAM 几乎不变；本征占比 0.625/0.75 为 11.90 / 12.69。
 
