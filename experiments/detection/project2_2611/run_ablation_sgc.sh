@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 训练队列：dw3 三 seed（42/43/44）；dw7 仅 seed 43/44（42 已有 `…_030_…_V2`）。
+# 训练队列：
+#   c3_sgdown_gbot_dw3     三 seed（42/43/44）
+#   c3_sgdown_gbot_dw7     seed 43/44（42 已有 `…_030_…_V2`）
+#   c3_ghostbot_dw3/dw5/dw7 Conv↓  各 seed 43/44（42 已有 `…_026/027/028_…_V1`）
 #
 #   本脚本只训练；test 用 analyze.py。
 #
@@ -19,11 +22,12 @@ case "$(uname -s)" in
 esac
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_gbot_dw3
-  sgc_yolov5s_c3_sgdown_gbot_dw3_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw3_seed44
-  sgc_yolov5s_c3_sgdown_gbot_dw7_seed43
-  sgc_yolov5s_c3_sgdown_gbot_dw7_seed44
+  sgc_yolov5s_c3_ghostbot_dw3_seed43
+  sgc_yolov5s_c3_ghostbot_dw3_seed44
+  sgc_yolov5s_c3_ghostbot_dw5_seed43
+  sgc_yolov5s_c3_ghostbot_dw5_seed44
+  sgc_yolov5s_c3_ghostbot_dw7_seed43
+  sgc_yolov5s_c3_ghostbot_dw7_seed44
 )
 
 run_train() {
@@ -43,4 +47,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "c3_sgdown_gbot_dw3/dw7 训练队列完成。"
+echo "训练队列完成。"
