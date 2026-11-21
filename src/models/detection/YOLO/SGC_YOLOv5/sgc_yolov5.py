@@ -42,10 +42,12 @@ class SGhostConv(GhostConv):
                          stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
                          act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
         self.groups = _shuffle_groups(out_channels, groups_ratio)
+        # 在 __init__ 中创建一次，forward 中复用（无参数/缓冲，不影响 state_dict）
+        self.shuffle = torch.nn.ChannelShuffle(self.groups)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = super().forward(x)
-        return torch.nn.ChannelShuffle(self.groups)(x)
+        return self.shuffle(x)
 
 
 class GBS(GhostConv):
@@ -318,12 +320,14 @@ class GSConv(nn.Module):
         self.dw_channels = out_channels // ratio
         # shuffle 作用在 cat 后的 out_channels 上，分组数需整除 out_channels
         self.groups = _shuffle_groups(out_channels, groups_ratio * ratio)
+        # 在 __init__ 中创建一次，forward 中复用（无参数/缓冲，不影响 state_dict）
+        self.shuffle = torch.nn.ChannelShuffle(self.groups)
         self.conv = BaseConv(in_channels, self.dw_channels, kernel_size, stride, act=act, bn=bn)
         self.DWconv = DepthwiseConv(self.dw_channels, dw_kernel_size, act=act, bn=bn)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
         x = torch.cat([x, self.DWconv(x)], dim=1)
-        return torch.nn.ChannelShuffle(self.groups)(x)
+        return self.shuffle(x)
 
 class GSBottleneck(nn.Module):
     '''
