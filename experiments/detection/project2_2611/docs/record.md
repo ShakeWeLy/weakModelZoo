@@ -8,33 +8,48 @@
 | c3_ghostbot_dw5                    | ghost-bot dw5 + Conv↓       | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.773 ± 0.012     | 0.464 ± 0.003     | 5.52       | 12.68     | 3 seed test（`027`+`034`/`035`）                          |
 | c3_ghostbot_dw7                    | ghost-bot dw7 + Conv↓       | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.782 ± 0.015     | 0.470 ± 0.009     | 5.53       | 12.74     | 3 seed test（`028`+`030`/`031`）                          |
 | c3_sgdown_gbot_dw3                 | ghost-bot dw3 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.765 ± 0.005     | 0.456 ± 0.006     | 4.73       | 10.76     | 3 seed（`2026-11-19_025`～`027`，test）                     |
-| **c3_sgdown_gbot_dw5**             | **ghost-bot dw5 + SGhost↓** | **VOVGCSPYolo** | **CBAM（full）+ DFC + dw 残差**       | **42/43/44** | **0.765 ± 0.018** | **0.456 ± 0.016** | **4.74**   | **10.80** | 3 seed 完成（s42 用 `2026-11-18_018_…_rerun_V2` test）       |
+| **c3_sgdown_gbot_dw5**             | **ghost-bot dw5 + SGhost↓** | **VOVGCSPYolo** | **CBAM（full）+ DFC strip + dw 残差** | **42/43/44** | **0.765 ± 0.018** | **0.456 ± 0.016** | **4.74**   | **10.80** | 3 seed（s42=`018_rerun_V2`）；+s45 见下节 **0.770±0.018**（4 seed） |
+| c3_sgdown_gbot_dw5（DFC GhostV2）  | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | CBAM + **dfc_type=ghostv2** + dw 残差 | 42           | 0.757             | 0.444             | 4.74       | —         | 单 seed（`033_dfcGhostV2`；低于 strip DFC s42 **0.785**）   |
 | c3_sgdown_gbot_dw5（P3 去 SAM）       | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | P3 仅 CAM，P4/P5 CBAM + DFC + dw 残差 | 42           | 0.782             | 0.469             | 4.74       | 10.80     | 单 seed（`2026-11-17_006_…_cbamCamP3_V1`）                 |
 | c3_sgdown_gbot_dw5（无 DFC）          | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ 无 DFC + dw 残差         | 42/43/44     | 0.785 ± 0.008     | 0.470 ± 0.006     | 4.73       | 10.75     | 3 seed（`007`+`2026-11-19_019`/`020`，test）               |
 | c3_sgdown_gbot_dw5（恒等残差）           | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + 恒等残差            | 42/43/44     | 0.765 ± 0.010     | 0.456 ± 0.007     | 4.73       | 10.74     | 3 seed（`008`+`2026-11-19_023`/`024`，test）               |
 | c3_sgdown_gbot_dw5（无 CBAM）         | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | 无 CBAM + DFC + dw 残差              | 42/43/44     | 0.782 ± 0.009     | 0.467 ± 0.011     | 4.69       | 10.79     | 3 seed（`005`+`2026-11-19_021`/`022`，test）               |
-| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            | 42/43/44     | 0.802 ± 0.015     | 0.482 ± 0.016     | 4.69       | 10.75     | 3 seed（`015`/`016_V2`/`017`，test；2026-11-18 完整 Det_Fly） |
+| c3_sgdown_gbot_dw5（无 DFC + 无 CBAM） | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | 无 CBAM + 无 DFC + dw 残差            | 42/43/44/45  | 0.795 ± 0.018     | 0.476 ± 0.018     | 4.69       | 10.75     | 4 seed（`015`～`017`+`032_seed45`）；s44 仍最高 **0.818**      |
 | c3_sgdown_gbot_dw5（本征占比 0.625）     | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.773 ± 0.004     | 0.461 ± 0.007     | 5.12       | 11.90     | 3 seed 完成（test，1501 张）                                  |
 | c3_sgdown_gbot_dw5（本征占比 0.75）      | ghost-bot dw5 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.777 ± 0.007     | 0.468 ± 0.004     | 5.45       | 12.69     | 3 seed 完成（test，1501 张）                                  |
-| c3_sgdown_gbot_dw7                 | ghost-bot dw7 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44     | 0.759 ± 0.043     | 0.453 ± 0.036     | 4.75       | 10.85     | 3 seed（s42=`…_030_…_V2`；s43 偏低见下节）                      |
+| c3_sgdown_gbot_dw7                 | ghost-bot dw7 + SGhost↓     | VOVGCSPYolo     | CBAM（full）+ DFC + dw 残差           | 42/43/44†    | 0.759 ± 0.043     | 0.453 ± 0.036     | 4.75       | 10.85     | †含坏 seed s43；**推荐 42/44/45：0.776±0.014** / 0.466±0.015   |
 
 
 
 
-### 待训（2026-11-20）：seed 45 + GhostNetV2 DFC
+### 服务器批次（2026-11-21）：seed 45 + DFC GhostV2
 
-- **动机**：dw5 / 无 DFC+无 CBAM / dw7 的 seed 方差偏大；dw7 s43 坏收敛。补 **seed 45**；并增加 **仅改 DFC** 的基线对照。
-- **DFC 实现**：历史 `dfc_type=strip`（默认）为 1×5 / 5×1 条带 depthwise **无池化**；`dfc_type=ghostv2` 对齐 GhostNetV2（`avg_pool2` → short_conv → sigmoid → nearest 上采样门控）。旧 checkpoint **不兼容** `ghostv2`。
-- **队列**（`run_ablation_sgc.sh`）：`seed45`×3 + `sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2`（s42）。
-- **汇总建议**：dw7 报告时用 **42/44/45** 或剔除 s43；无 DFC+无 CBAM 可报 **42/43/44/45** 四 seed 或 **42/43/45** 去掉 s44 离群。
+- **来源**：`project2_2611/new/` 四 run 已迁入 `SGC_YOLOv5_c3_sgdown_gbot_dw5/runs/`（3 项）与 `…_dw7/runs/`（s45），并完成 test 评估。
+- **单 seed test（1501 张）**
 
+| 配置 | Run | seed | mAP50 | mAP50-95 |
+|:--|:--|:--:|--:|--:|
+| dw5 基线 | `2026-11-20_030_…_seed45_V1` | 45 | 0.785 | 0.457 |
+| dw7 | `2026-11-20_031_…_seed45_V1` | 45 | 0.760 | 0.449 |
+| 无 DFC+无 CBAM | `2026-11-20_032_…_noDFC_cbamNone_seed45_V1` | 45 | 0.775 | 0.458 |
+| dw5 + DFC GhostV2 | `2026-11-20_033_…_dfcGhostV2_seed42_V1` | 42 | 0.757 | 0.444 |
 
-| 配置                | `-m`                                                    | seed |
-| ----------------- | ------------------------------------------------------- | ---- |
-| dw5 基线            | `sgc_yolov5s_c3_sgdown_gbot_dw5_seed45`                 | 45   |
-| dw7               | `sgc_yolov5s_c3_sgdown_gbot_dw7_seed45`                 | 45   |
-| 无 DFC+无 CBAM      | `sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed45` | 45   |
-| dw5 + DFC GhostV2 | `sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2`            | 42   |
+- **与既有 seed 合并汇总**
+
+| 配置 | seeds | mAP50 | mAP50-95 | 备注 |
+|:--|:--|:--|:--|:--|
+| dw5 strip DFC | 42/43/44（现行） | **0.765 ± 0.018** | 0.456 ± 0.016 | 不变 |
+| dw5 strip DFC | **+45 → 四 seed** | **0.770 ± 0.018** | **0.456 ± 0.013** | s45=**0.785** 与 s42 重合，**未缩小 σ** |
+| dw7 | 42/43/44 | 0.759 ± 0.043 | 0.453 ± 0.036 | s43 坏点仍在 |
+| dw7 **推荐** | **42/44/45** | **0.776 ± 0.014** | **0.466 ± 0.015** | 剔除 s43 后 σ 由 0.043→0.014 |
+| 无 DFC+无 CBAM | **42/43/44/45** | **0.795 ± 0.018** | **0.476 ± 0.018** | s45 **0.775** 低于 s44 **0.818**，四 seed 略拉低均值 |
+| 无 DFC+无 CBAM | 42/43/45（去 s44） | 0.787 ± 0.011 | 0.469 ± 0.006 | 若要去离群 s44 |
+
+- **解读**
+  1. **补 seed 45 没能「治愈」dw5 方差**：四 seed σ 仍为 **0.018**；s45 并非中间值，而是再次落在高侧（0.785），说明离散来自 **42/45 vs 43** 双峰，而非单点偶然。
+  2. **dw7 应报告 42/44/45**：s45=0.760 正常，与 s44 同档；含 s43 的统计无参考价值。
+  3. **DFC GhostV2（池化门控）单点落后 strip**：test **0.757 / 0.444**，比同 seed strip 基线（rerun s42 **0.785 / 0.474**）低 **~2.8 pt / 3 pt**；**无证据支持**把默认 DFC 换成 GhostV2 池化版（仅 s42，需多 seed 才能定论，但趋势偏负）。
+  4. **无 DFC+无 CBAM**：加 s45 后仍 **高于完整 dw5 约 +2.5 pt mAP50**，优势保留；s45 未打破「去模块反而高」的现象，但仍应视为 **seed 噪声内结构对比**，不宜过拟合解释。
 
 
 
