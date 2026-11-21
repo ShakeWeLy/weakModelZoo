@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# 训练队列（2026-11-20）：
-#   seed 45：dw5 基线 / dw7 / 无 DFC+无 CBAM（压方差、替换异常 seed）
-#   基线 + GhostNetV2 DFC（dfc_type=ghostv2，仅改门控）
+# 训练队列：无 DFC + 无 CBAM，补 seed 46/47/48（已有 42/43/44/45）。
 #
 # 用法（仓库根目录）：
 #   bash experiments/detection/project2_2611/run_ablation_sgc.sh
@@ -19,10 +17,9 @@ case "$(uname -s)" in
 esac
 
 MODELS=(
-  sgc_yolov5s_c3_sgdown_gbot_dw5_seed45
-  sgc_yolov5s_c3_sgdown_gbot_dw7_seed45
-  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed45
-  sgc_yolov5s_c3_sgdown_gbot_dw5_dfc_ghostv2
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed46
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed47
+  sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_seed48
 )
 
 run_train() {
@@ -42,4 +39,4 @@ for m in "${MODELS[@]}"; do
   echo
 done
 
-echo "seed45 + DFC GhostV2 训练队列完成。"
+echo "无 DFC+无 CBAM seed 46/47/48 训练队列完成。"
