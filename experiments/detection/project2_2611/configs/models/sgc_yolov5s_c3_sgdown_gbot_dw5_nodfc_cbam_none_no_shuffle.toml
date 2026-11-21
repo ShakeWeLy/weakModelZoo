@@ -1,0 +1,34 @@
+# 训练期去掉 ChannelShuffle（与 no_train shuffle_ablation 的 TRT 消融对照）。
+# 结构同 nodfc+cbam_none（015），`use_shuffle=false`；seed=42，40 epoch。
+
+[experiments]
+name = "2026-11-21_037_SGC_c3_sgdown_gbot_dw5_s_noDFC_cbamNone_noShuffle_seed42_V1"
+description = "c3_sgdown + ghost-bot dw5 | no DFC + no CBAM + no ChannelShuffle | seed 42 | 40 epochs"
+
+[model]
+arch = "sgc_yolov5"
+display_name = "SGC_YOLOv5_c3_sgdown_gbot_dw5"
+
+[model.params]
+variant = "s"
+kernel_size = 1
+mid_kernel_size = 3
+dw_kernel_size = 1
+mid_dw_kernel_size = 5
+groups_ratio = 4
+ratio = 2
+e = 0.5
+vov_style = "yolo"
+downsample_type = "sghost"
+proj_type = "conv"
+bottleneck_type = "ghost"
+csp_style = "yolo"
+use_dfc = false
+cbam_mode = "none"
+use_shuffle = false
+
+[hyperparameters]
+num_epochs = 40
+
+[train]
+seed = 42

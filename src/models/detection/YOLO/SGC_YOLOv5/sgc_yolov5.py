@@ -37,17 +37,19 @@ class SGhostConv(GhostConv):
                 act=True,
                 bn=True,
                 intrinsic_ratio=None,
+                use_shuffle: bool = True,
                 ):
         super().__init__(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                          stride=stride, padding=padding, ratio=ratio, dw_kernel_size=dw_kernel_size,
                          act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
+        self.use_shuffle = use_shuffle
         self.groups = _shuffle_groups(out_channels, groups_ratio)
         # 在 __init__ 中创建一次，forward 中复用（无参数/缓冲，不影响 state_dict）
-        self.shuffle = torch.nn.ChannelShuffle(self.groups)
+        self.shuffle = torch.nn.ChannelShuffle(self.groups) if use_shuffle else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = super().forward(x)
-        return self.shuffle(x)
+        return x if self.shuffle is None else self.shuffle(x)
 
 
 class GBS(GhostConv):
@@ -153,6 +155,7 @@ class Bottleneck(nn.Module):
                 dfc_type: str = "strip",
                 res_type: str = "dw",
                 intrinsic_ratio: float | None = None,
+                use_shuffle: bool = True,
                 ) -> None:
         super().__init__()
         if res_type not in ("dw", "identity"):
@@ -167,10 +170,11 @@ class Bottleneck(nn.Module):
         self.SGhostConv1 = SGhostConv(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
                                       dw_kernel_size=dw_kernel_size, act=act, bn=bn,
-                                      intrinsic_ratio=intrinsic_ratio)
+                                      intrinsic_ratio=intrinsic_ratio, use_shuffle=use_shuffle)
         self.SGhostConv2 = SGhostConv(in_channels=out_channels, out_channels=out_channels, kernel_size=k2,
                                       stride=stride, padding=padding, ratio=ratio, groups_ratio=groups_ratio,
-                                      dw_kernel_size=dw2, act=act, bn=bn, intrinsic_ratio=intrinsic_ratio)
+                                      dw_kernel_size=dw2, act=act, bn=bn, intrinsic_ratio=intrinsic_ratio,
+                                      use_shuffle=use_shuffle)
         # self.DWConv1 = BaseConv(out_channels, out_channels, kernel_size, stride, groups=out_channels, act=act, bn=bn)  # stride=2 分支专用，已注释
         self.DFCAttention = _build_dfc_attention(in_channels, use_dfc, dfc_type)
         # res_type="dw"（默认）：残差支路为 3×3 深度卷积；"identity"：恒等捷径（消融）
@@ -224,6 +228,7 @@ class SDGhost(nn.Module):
                  dfc_type: str = "strip",
                  res_type: str = "dw",
                  intrinsic_ratio: float | None = None,
+                 use_shuffle: bool = True,
                  ) -> None:
         super().__init__()
         if n < 1:
@@ -262,6 +267,7 @@ class SDGhost(nn.Module):
                     dfc_type=dfc_type,
                     res_type=res_type,
                     intrinsic_ratio=intrinsic_ratio,
+                    use_shuffle=use_shuffle,
                 )
                 for _ in range(n)
             ])
@@ -312,6 +318,7 @@ class GSConv(nn.Module):
                  dw_kernel_size=3,
                  act=F.silu,
                  bn=F.batch_norm,
+                 use_shuffle: bool = True,
                 ):
         super().__init__()
         # 输出 = 普通卷积分支(dw_channels) + 深度卷积分支(dw_channels)，只有 ratio=2 且 out 为偶数时才等于 out_channels
@@ -319,15 +326,16 @@ class GSConv(nn.Module):
             raise ValueError(f"GSConv 要求 ratio=2 且 out_channels 为偶数，当前 ratio={ratio}, out_channels={out_channels}")
         self.dw_channels = out_channels // ratio
         # shuffle 作用在 cat 后的 out_channels 上，分组数需整除 out_channels
+        self.use_shuffle = use_shuffle
         self.groups = _shuffle_groups(out_channels, groups_ratio * ratio)
         # 在 __init__ 中创建一次，forward 中复用（无参数/缓冲，不影响 state_dict）
-        self.shuffle = torch.nn.ChannelShuffle(self.groups)
+        self.shuffle = torch.nn.ChannelShuffle(self.groups) if use_shuffle else None
         self.conv = BaseConv(in_channels, self.dw_channels, kernel_size, stride, act=act, bn=bn)
         self.DWconv = DepthwiseConv(self.dw_channels, dw_kernel_size, act=act, bn=bn)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
         x = torch.cat([x, self.DWconv(x)], dim=1)
-        return self.shuffle(x)
+        return x if self.shuffle is None else self.shuffle(x)
 
 class GSBottleneck(nn.Module):
     '''
@@ -344,11 +352,14 @@ class GSBottleneck(nn.Module):
         act=F.silu,
         bn=F.batch_norm,
         mid_kernel_size: int | None = None,
+        use_shuffle: bool = True,
     ):
         super().__init__()
         k2 = kernel_size if mid_kernel_size is None else mid_kernel_size
-        self.GSConv1 = GSConv(channels, channels, kernel_size, 1, ratio, groups_ratio, dw_kernel_size, act, bn)
-        self.GSConv2 = GSConv(channels, channels, k2, 1, ratio, groups_ratio, dw_kernel_size, act, bn)
+        self.GSConv1 = GSConv(channels, channels, kernel_size, 1, ratio, groups_ratio, dw_kernel_size, act, bn,
+                              use_shuffle=use_shuffle)
+        self.GSConv2 = GSConv(channels, channels, k2, 1, ratio, groups_ratio, dw_kernel_size, act, bn,
+                              use_shuffle=use_shuffle)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.GSConv2(self.GSConv1(x)) + x
@@ -426,6 +437,7 @@ class VOVGCSPYolo(nn.Module):
         act=F.silu,
         bn=F.batch_norm,
         e: float = 0.5,
+        use_shuffle: bool = True,
     ) -> None:
         super().__init__()
         if n < 1:
@@ -446,6 +458,7 @@ class VOVGCSPYolo(nn.Module):
                 act=act,
                 bn=bn,
                 mid_kernel_size=3,
+                use_shuffle=use_shuffle,
             )
             for _ in range(n)
         ])
@@ -491,6 +504,7 @@ class Backbone(nn.Module):
         dfc_type: str = "strip",
         res_type: str = "dw",
         intrinsic_ratio: float | None = None,
+        use_shuffle: bool = True,
     ) -> None:
         super().__init__()
         s = _Scaler(gw, gd)
@@ -498,7 +512,7 @@ class Backbone(nn.Module):
         if dtype not in {"sghost", "conv"}:
             raise ValueError(f"downsample_type 须为 sghost/conv，当前 {downsample_type!r}")
         ghost_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size,
-                        intrinsic_ratio=intrinsic_ratio)
+                        intrinsic_ratio=intrinsic_ratio, use_shuffle=use_shuffle)
         block_kw = dict(
             kernel_size=kernel_size,
             ratio=ratio,
@@ -514,6 +528,7 @@ class Backbone(nn.Module):
             dfc_type=dfc_type,
             res_type=res_type,
             intrinsic_ratio=intrinsic_ratio,
+            use_shuffle=use_shuffle,
         )
 
         def _down(cin: int, cout: int) -> nn.Module:
@@ -572,6 +587,7 @@ class Neck(nn.Module):
         mid_kernel_size: int | None = None,
         vov_style: str = "split",
         cbam_mode: str = "full",
+        use_shuffle: bool = True,
     ) -> None:
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")  # ???为什么要上采样？
@@ -579,13 +595,14 @@ class Neck(nn.Module):
         s = _Scaler(gw, gd)
         # 通道数由 Backbone 输出推导（已按 gw 缩放），不再写死
         c3, c4, c5 = ch3, ch4, ch5
-        gs_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size)
+        gs_kw = dict(ratio=ratio, groups_ratio=groups_ratio, dw_kernel_size=dw_kernel_size,
+                     use_shuffle=use_shuffle)
         style = str(vov_style).lower()
         if style == "yolo":
             def _vov(cin: int, cout: int, n: int) -> nn.Module:
                 return VOVGCSPYolo(
                     cin, cout, n=n, ratio=ratio, groups_ratio=groups_ratio,
-                    dw_kernel_size=dw_kernel_size,
+                    dw_kernel_size=dw_kernel_size, use_shuffle=use_shuffle,
                 )
         elif style == "split":
             vov_kw = dict(
@@ -677,6 +694,7 @@ class SGC_YOLOv5(nn.Module):
         res_type: str = "dw",
         cbam_mode: str = "full",
         intrinsic_ratio: float | None = None,
+        use_shuffle: bool = True,
     ) -> None:
         super().__init__()
         if variant not in VARIANTS:
@@ -702,6 +720,7 @@ class SGC_YOLOv5(nn.Module):
             dfc_type=dfc_type,
             res_type=res_type,
             intrinsic_ratio=intrinsic_ratio,
+            use_shuffle=use_shuffle,
         )
         self.backbone = Backbone(gw, gd, in_channels, **ghost_kw)
         # Neck 的 GSConv 廉价支路默认应为 3；若显式传入 dw_kernel_size 则一并覆盖
@@ -718,6 +737,7 @@ class SGC_YOLOv5(nn.Module):
             mid_kernel_size=mid_kernel_size,
             vov_style=vov_style,
             cbam_mode=cbam_mode,
+            use_shuffle=use_shuffle,
         )
         self.detect = Detect(nc, self.neck.out_channels, anchors)
 

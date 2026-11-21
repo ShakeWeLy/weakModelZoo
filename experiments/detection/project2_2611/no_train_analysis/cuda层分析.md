@@ -142,7 +142,10 @@ ONNX 算子差异：Reshape 69 → 9，Transpose 33 → 3，Constant 206 → 146
 ### 4.3 对后续工作的含义
 
 - 要保留等价性，可以考虑把通道置换折叠进消费者的权重，从而避免布局转换。但 SGC 中 shuffle 的输出还会与残差、门控等张量相加或相乘，需要逐个分析消费者，不能一概而论。这一点还未验证。
-- 本实验无法给出"去掉 Shuffle 后的模型能提升多少检测性能"的答案，那需要重新训练并评估精度。
+- 部署侧 `shuffle_ablation_build.py` 无法回答「去掉 Shuffle 后 mAP 会变多少」，需在训练期关闭混洗并重新训评。**已加 3 seed（42/43/44）**，与有 Shuffle 的 `015/016/017`（`sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none*`，seed 42/43/44）一一对照；`model.params.use_shuffle = false`（`SGhostConv` / `GSConv` 不再调用 `ChannelShuffle`）。
+  - 配置：`sgc_yolov5s_c3_sgdown_gbot_dw5_nodfc_cbam_none_no_shuffle`、`_seed43`、`_seed44`
+  - Run：`2026-11-21_037/038/039_SGC_c3_sgdown_gbot_dw5_s_noDFC_cbamNone_noShuffle_seed{42,43,44}_V1`
+  - 队列：`bash experiments/detection/project2_2611/run_ablation_sgc.sh`（训完后 `analyze.py --split test --checkpoint best --no-vis`，并与 015–017 对比 mAP）
 
 ---
 
