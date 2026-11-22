@@ -19,8 +19,8 @@ description = ""             # 建议以日期开头： "YYYY-MM-DD | ..."
 [dataset]
 # TODO: 对接 DSTFP 数据管线（fMRI 4D + FA/DTI 3D）
 # 占位：路径留空时训练入口应报清晰错误或走 mock
-fmri_data_dir = ""           # fMRI 预处理后的数据目录（占位）
-fa_data_dir = ""             # FA/DTI 预处理后的数据目录（占位）
+fmri_data_dir = "F:/myproject/weakModelZoo/data/PPMI_DSTFP"  # PPMI 导出：*_{CN,PD,Prodromal}_MNI_to_TRs_minmax
+fa_data_dir = "F:/myproject/weakModelZoo/data/PPMI_DSTFP"    # 同上 *_{}_FA_processed/img
 dataset_name = "Triple"      # 可选占位: Triple / FA3D / Multimodal（对齐 DSTFP/module）
 num_classes = 3              # tri_class：HC / prodromal PD / confirmed PD（占位）
 batch_size = 4
