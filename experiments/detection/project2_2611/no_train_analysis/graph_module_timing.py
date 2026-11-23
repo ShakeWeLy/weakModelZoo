@@ -4,11 +4,11 @@
 不根据旧的 eager 模块表做替换决策。
 
 方法：
-1. 一次整网前向，捕获 backbone / neck / detect 的真实输入；
-2. 对每个目标（whole / backbone / neck / detect）：
+1. 一次整网前向，捕获 backbone / neck / detect 及其直接子模块的真实输入；
+2. 对每个目标（whole / backbone / neck / detect / backbone.* / neck.*）：
    - eager 逐次同步（CUDA Event 中位数）
    - CUDA Graph 回放（CUDA Event 中位数）——接近纯 GPU 执行时间
-3. 报告 Graph 占比、与 YOLOv5s 的倍数。
+3. 报告 Graph 占比、与 YOLOv5s 的倍数，并给出子模块 Graph 表。
 
 注意：
 - 模块 Graph 时间之和不必等于整网 Graph（独立 capture、独立回放，边界不同）。
@@ -105,54 +105,57 @@ def graph_ms(fn, n: int = GRAPH_N) -> tuple[float, float] | None:
         return None
 
 
-def capture_io(model, x):
-    """一次前向，拿到 backbone/neck/detect 的真实输入与可调用 wrapper。"""
-    bb_in = [x]
-    nk_in: list = []
-    dt_in: list = []
-    hs = []
-
-    def pre_bb(m, inp):
-        bb_in[0] = inp[0].detach()
-
-    def pre_nk(m, inp):
-        nk_in.clear()
-        nk_in.extend(t.detach() for t in inp)
-
-    def pre_dt(m, inp):
-        # Detect 接收 list[Tensor]
-        dt_in.clear()
-        arg = inp[0]
-        if isinstance(arg, (list, tuple)):
-            dt_in.extend(t.detach() for t in arg)
+def _freeze_args(inp) -> tuple:
+    """把 hook 捕获的输入做成地址稳定的 contiguous 缓冲，供 Graph capture 使用。"""
+    out = []
+    for a in inp:
+        if torch.is_tensor(a):
+            out.append(a.detach().contiguous())
+        elif isinstance(a, (list, tuple)):
+            out.append(type(a)(t.detach().contiguous() if torch.is_tensor(t) else t for t in a))
         else:
-            dt_in.append(arg.detach())
+            out.append(a)
+    return tuple(out)
 
-    hs.append(model.backbone.register_forward_pre_hook(pre_bb))
-    hs.append(model.neck.register_forward_pre_hook(pre_nk))
-    hs.append(model.detect.register_forward_pre_hook(pre_dt))
+
+def _make_fn(mod, args):
+    """闭包：用固定 args 调用模块。Detect 等接收 list 的模块也适用。"""
+    return lambda m=mod, a=args: m(*a)
+
+
+def capture_io(model, x):
+    """一次前向，拿到 whole / backbone / neck / detect 及其直接子模块的真实输入。"""
+    child_names = [f"backbone.{n}" for n, _ in model.backbone.named_children()] + [
+        f"neck.{n}" for n, _ in model.neck.named_children()
+    ]
+    want = {"backbone", "neck", "detect", *child_names}
+    captured: dict[str, tuple] = {}
+    hs = []
+    mods = dict(model.named_modules())
+    for name in want:
+        def pre(m, inp, name=name):
+            captured[name] = tuple(inp)
+
+        hs.append(mods[name].register_forward_pre_hook(pre))
     with torch.no_grad():
         model(x)
     for h in hs:
         h.remove()
 
-    # 静态输入缓冲（Graph capture 要求地址稳定；对子模块用 clone 出的固定缓冲）
-    x_bb = bb_in[0].contiguous()
-    x_nk = tuple(t.contiguous() for t in nk_in)
-    x_dt = [t.contiguous() for t in dt_in]
+    frozen = {n: _freeze_args(captured[n]) for n in want if n in captured}
+    targets: dict[str, object] = {"whole": lambda: model(x)}
+    for n, args in frozen.items():
+        targets[n] = _make_fn(mods[n], args)
 
-    targets = {
-        "whole": lambda: model(x),
-        "backbone": lambda: model.backbone(x_bb),
-        "neck": lambda: model.neck(*x_nk),
-        "detect": lambda: model.detect(x_dt),
-    }
     shapes = {
-        "backbone_in": list(x_bb.shape),
-        "neck_in": [list(t.shape) for t in x_nk],
-        "detect_in": [list(t.shape) for t in x_dt],
+        n: [
+            list(a.shape) if torch.is_tensor(a) else
+            [list(t.shape) if torch.is_tensor(t) else str(type(t)) for t in a]
+            for a in args
+        ]
+        for n, args in frozen.items()
     }
-    return targets, shapes
+    return targets, shapes, child_names
 
 
 def main() -> None:
@@ -165,9 +168,13 @@ def main() -> None:
     for label, cfg in MODELS.items():
         print(f"\n== {label}", flush=True)
         model = ra.load_model({"model": cfg["model"], "run": cfg["run"]}).eval().to(device)
-        targets, shapes = capture_io(model, x)
-        row: dict = {"shapes": shapes, "modules": {}}
-        for name, fn in targets.items():
+        targets, shapes, child_names = capture_io(model, x)
+        row: dict = {"shapes": shapes, "modules": {}, "children": child_names}
+        # 先 top，再子模块；打印时对齐到最长名字
+        order = ["whole", "backbone", "neck", "detect", *child_names]
+        w = max(len(n) for n in order)
+        for name in order:
+            fn = targets[name]
             e_med, e_p90 = eager_ms(fn)
             g = graph_ms(fn)
             entry = {
@@ -181,7 +188,7 @@ def main() -> None:
             row["modules"][name] = entry
             g_str = "失败" if g is None else f"{g[0]:.3f} ms (P90 {g[1]:.3f})"
             print(
-                f"   {name:<10} eager {e_med:7.3f} ms (P90 {e_p90:.3f}) | graph {g_str}",
+                f"   {name:<{w}} eager {e_med:7.3f} ms (P90 {e_p90:.3f}) | graph {g_str}",
                 flush=True,
             )
 
@@ -189,8 +196,9 @@ def main() -> None:
         gm = row["modules"]
         if gm["whole"]["graph_ms"] and all(gm[k]["graph_ms"] for k in ("backbone", "neck", "detect")):
             tw = gm["whole"]["graph_ms"]
-            for k in ("backbone", "neck", "detect"):
-                gm[k]["graph_share_of_whole"] = gm[k]["graph_ms"] / tw
+            for k in ("backbone", "neck", "detect", *child_names):
+                if gm[k]["graph_ms"] is not None:
+                    gm[k]["graph_share_of_whole"] = gm[k]["graph_ms"] / tw
             ssum = sum(gm[k]["graph_ms"] for k in ("backbone", "neck", "detect"))
             row["graph_sum_modules_ms"] = ssum
             row["graph_sum_over_whole"] = ssum / tw
@@ -205,16 +213,25 @@ def main() -> None:
         del model
         torch.cuda.empty_cache()
 
-    # 跨模型对比表
+    # 跨模型对比表（top + 公共子模块）
     if all(k in out for k in MODELS):
+        yolo_c = set(out["YOLOv5s"]["children"])
+        sgc_c = set(out["SGC 无注意力"]["children"])
+        common = [n for n in out["YOLOv5s"]["children"] if n in sgc_c]
+        only_sgc = [n for n in out["SGC 无注意力"]["children"] if n not in yolo_c]
         print("\n== 跨模型 Graph 对比（ms）", flush=True)
-        print(f"   {'模块':<10} {'YOLOv5s':>10} {'SGC 无注意力':>12} {'倍数':>8} {'差值':>8}", flush=True)
-        for name in ("whole", "backbone", "neck", "detect"):
+        print(f"   {'模块':<22} {'YOLOv5s':>10} {'SGC 无注意力':>12} {'倍数':>8} {'差值':>8}", flush=True)
+        for name in ("whole", "backbone", "neck", "detect", *common):
             a = out["YOLOv5s"]["modules"][name]["graph_ms"]
             b = out["SGC 无注意力"]["modules"][name]["graph_ms"]
             if a is None or b is None:
                 continue
-            print(f"   {name:<10} {a:10.3f} {b:12.3f} {b / a:8.2f} {b - a:8.3f}", flush=True)
+            print(f"   {name:<22} {a:10.3f} {b:12.3f} {b / a:8.2f} {b - a:8.3f}", flush=True)
+        for name in only_sgc:
+            b = out["SGC 无注意力"]["modules"][name]["graph_ms"]
+            if b is None:
+                continue
+            print(f"   {name:<22} {'—':>10} {b:12.3f} {'—':>8} {'—':>8}", flush=True)
 
     OUT.mkdir(parents=True, exist_ok=True)
     stamp = date.today().isoformat()
